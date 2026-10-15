@@ -418,3 +418,212 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 end)
+-- <w> : by wleo : yoruka.id
+-- Tambahan Mark Menu | tempel di PALING BAWAH script (di bawah Part Ring)
+
+state.speed, state.lowgrav, state.esp = false, false, false
+state.antifling, state.clicktp, state.clickfling = false, false, false
+
+local speedVals = {50, 100, 200}
+local speedVal = 100
+local origGravity = Workspace.Gravity
+local LOW_GRAVITY = 60
+
+-- Menu jadi bisa di-scroll biar muat banyak tombol
+do
+	local old = body
+	local scroll = Instance.new("ScrollingFrame")
+	scroll.Size = old.Size
+	scroll.Position = old.Position
+	scroll.BackgroundTransparency = 1
+	scroll.BorderSizePixel = 0
+	scroll.ScrollBarThickness = 4
+	scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	scroll.Parent = main
+	for _, c in ipairs(old:GetChildren()) do c.Parent = scroll end
+	old:Destroy()
+	body = scroll
+end
+
+------------------------------------------------ Super Speed & Low Gravity
+makeToggle("Super Speed", "speed", function(on)
+	if not on then
+		local _, hum = getParts()
+		if hum then hum.WalkSpeed = 16 end
+	end
+end)
+
+local speedBtn = makeButton("Kecepatan: " .. speedVal)
+speedBtn.BackgroundColor3 = Color3.fromRGB(50, 90, 170)
+speedBtn.MouseButton1Click:Connect(function()
+	local i = table.find(speedVals, speedVal) or 1
+	speedVal = speedVals[(i % #speedVals) + 1]
+	speedBtn.Text = "Kecepatan: " .. speedVal
+end)
+
+makeToggle("Low Gravity", "lowgrav", function(on)
+	Workspace.Gravity = on and LOW_GRAVITY or origGravity
+end)
+
+RunService.Heartbeat:Connect(function()
+	if state.speed then
+		local _, hum = getParts()
+		if hum then hum.WalkSpeed = speedVal end
+	end
+end)
+
+------------------------------------------------ ESP (tembus tembok)
+local espObjs = {}
+
+local function clearESP()
+	for _, o in pairs(espObjs) do
+		o.hl:Destroy()
+		o.bb:Destroy()
+	end
+	table.clear(espObjs)
+end
+
+makeToggle("ESP", "esp", function(on)
+	if not on then clearESP() end
+end)
+
+local espTimer = 0
+RunService.Heartbeat:Connect(function(dt)
+	if not state.esp then return end
+	espTimer += dt
+	if espTimer < 0.15 then return end
+	espTimer = 0
+
+	local _, _, myRoot = getParts()
+
+	for plr, o in pairs(espObjs) do
+		if not plr.Parent then
+			o.hl:Destroy()
+			o.bb:Destroy()
+			espObjs[plr] = nil
+		end
+	end
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		local char = plr.Character
+		if plr ~= player and char then
+			local head = char:FindFirstChild("Head")
+			local o = espObjs[plr]
+			if not o then
+				local hl = Instance.new("Highlight")
+				hl.FillColor = Color3.fromRGB(255, 60, 60)
+				hl.FillTransparency = 0.6
+				hl.OutlineColor = Color3.new(1, 1, 1)
+				hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+				hl.Parent = gui
+
+				local bb = Instance.new("BillboardGui")
+				bb.Size = UDim2.new(0, 120, 0, 20)
+				bb.StudsOffset = Vector3.new(0, 2.5, 0)
+				bb.AlwaysOnTop = true
+				bb.Parent = gui
+				local tl = Instance.new("TextLabel")
+				tl.Size = UDim2.new(1, 0, 1, 0)
+				tl.BackgroundTransparency = 1
+				tl.TextColor3 = Color3.new(1, 1, 1)
+				tl.TextStrokeTransparency = 0
+				tl.Font = Enum.Font.GothamBold
+				tl.TextSize = 13
+				tl.Parent = bb
+
+				o = {hl = hl, bb = bb, tl = tl}
+				espObjs[plr] = o
+			end
+			o.hl.Adornee = char
+			if head then
+				o.bb.Adornee = head
+				local dist = myRoot and math.floor((head.Position - myRoot.Position).Magnitude) or 0
+				o.tl.Text = plr.DisplayName .. " [" .. dist .. "m]"
+			end
+		end
+	end
+end)
+
+------------------------------------------------ Anti Fling
+makeToggle("Anti Fling", "antifling")
+
+RunService.Stepped:Connect(function()
+	if not state.antifling then return end
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= player and plr.Character then
+			for _, p in ipairs(plr.Character:GetDescendants()) do
+				if p:IsA("BasePart") then p.CanCollide = false end
+			end
+		end
+	end
+end)
+
+RunService.Heartbeat:Connect(function()
+	if not state.antifling or busy then return end
+	local _, _, root = getParts()
+	if not root then return end
+	if root.AssemblyLinearVelocity.Magnitude > 300 or root.AssemblyAngularVelocity.Magnitude > 100 then
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+	end
+end)
+
+------------------------------------------------ Click TP & Click Fling
+makeToggle("Click TP", "clicktp")
+makeToggle("Click Fling", "clickfling")
+
+local function clickFling(targetChar)
+	if busy then return end
+	local _, _, root = getParts()
+	local tr = targetChar:FindFirstChild("HumanoidRootPart")
+	if not root or not tr then return end
+	busy = true
+	local origCF = root.CFrame
+	local t0 = tick()
+	while tick() - t0 < 0.6 and tr.Parent and root.Parent do
+		root.CFrame = tr.CFrame
+		root.AssemblyLinearVelocity = Vector3.new(0, 20000, 0)
+		root.AssemblyAngularVelocity = Vector3.new(0, 40000, 0)
+		RunService.Heartbeat:Wait()
+	end
+	if root.Parent then
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+		root.CFrame = origCF
+	end
+	busy = false
+end
+
+UserInputService.InputBegan:Connect(function(input, gp)
+	if gp then return end
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1
+		and input.UserInputType ~= Enum.UserInputType.Touch then return end
+	if not (state.clicktp or state.clickfling) then return end
+
+	local char, _, root = getParts()
+	if not char then return end
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = {char}
+
+	local ray = camera:ScreenPointToRay(input.Position.X, input.Position.Y)
+	local result = Workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
+	if not result then return end
+
+	if state.clickfling then
+		-- Lanjutan: ganti baris yang terpotong (FindFirstAncest...) dengan kode ini sampai akhir
+
+		local model = result.Instance:FindFirstAncestorOfClass("Model")
+		local plr = model and Players:GetPlayerFromCharacter(model)
+		if plr and plr ~= player then
+			task.spawn(clickFling, model)
+			return
+		end
+	end
+
+	if state.clicktp and not busy then
+		root.CFrame = CFrame.new(result.Position + Vector3.new(0, 3, 0))
+	end
+end)
