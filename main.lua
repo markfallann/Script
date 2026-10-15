@@ -316,3 +316,105 @@ RunService.Heartbeat:Connect(function()
 	end
 	busy = false
 end)
+-- <w> : by wleo : yoruka.id
+-- Part Ring | tempel di PALING BAWAH script Mark Menu
+
+state.ring = false
+
+local RING_RADIUS = 14
+local RING_SPEED = 2.5
+local RING_MAX = 80
+local ringParts, ringBlocks = {}, {}
+local ringAngle, ringScan, lastChar = 0, 0, nil
+
+local function isCharPart(p)
+	local m = p:FindFirstAncestorOfClass("Model")
+	return m and m:FindFirstChildOfClass("Humanoid") ~= nil
+end
+
+local function clearBlocks()
+	for _, c in ipairs(ringBlocks) do c:Destroy() end
+	table.clear(ringBlocks)
+end
+
+local function bindPart(part, char)
+	for _, cp in ipairs(char:GetDescendants()) do
+		if cp:IsA("BasePart") then
+			local n = Instance.new("NoCollisionConstraint")
+			n.Part0, n.Part1 = part, cp
+			n.Parent = part
+			table.insert(ringBlocks, n)
+		end
+	end
+end
+
+local function flingTouched(part)
+	part.Touched:Connect(function(hit)
+		if not state.ring then return end
+		local model = hit:FindFirstAncestorOfClass("Model")
+		local plr = model and Players:GetPlayerFromCharacter(model)
+		if plr and plr ~= player then
+			local r = model:FindFirstChild("HumanoidRootPart")
+			if r then
+				r.AssemblyLinearVelocity = Vector3.new(
+					math.random(-1, 1) * 9000, 9000, math.random(-1, 1) * 9000)
+				r.AssemblyAngularVelocity = Vector3.new(0, 9000, 0)
+			end
+		end
+	end)
+end
+
+local touchBound = setmetatable({}, {__mode = "k"})
+
+local function scanParts(char)
+	table.clear(ringParts)
+	for _, p in ipairs(Workspace:GetDescendants()) do
+		if #ringParts >= RING_MAX then break end
+		if p:IsA("BasePart") and not p.Anchored and not isCharPart(p)
+			and p.Size.Magnitude < 30 then
+			table.insert(ringParts, p)
+			bindPart(p, char)
+			if not touchBound[p] then
+				touchBound[p] = true
+				flingTouched(p)
+			end
+		end
+	end
+end
+
+makeToggle("Part Ring", "ring", function(on)
+	if not on then
+		clearBlocks()
+		table.clear(ringParts)
+		lastChar = nil
+	end
+end)
+
+RunService.Heartbeat:Connect(function(dt)
+	if not state.ring then return end
+	local char, _, root = getParts()
+	if not root then return end
+
+	-- scan ulang tiap 3 detik atau saat respawn
+	ringScan += dt
+	if char ~= lastChar or ringScan > 3 then
+		lastChar, ringScan = char, 0
+		clearBlocks()
+		scanParts(char)
+	end
+
+	ringAngle += dt * RING_SPEED
+	local n = #ringParts
+	for i, p in ipairs(ringParts) do
+		if p.Parent then
+			local a = ringAngle + (i / n) * math.pi * 2
+			local layer = (i % 3) * 4 - 2
+			local target = root.Position + Vector3.new(
+				math.cos(a) * RING_RADIUS, layer + 3, math.sin(a) * RING_RADIUS)
+			local v = (target - p.Position) * 12
+			if v.Magnitude > 250 then v = v.Unit * 250 end
+			p.AssemblyLinearVelocity = v
+			p.AssemblyAngularVelocity = Vector3.new(0, 40, 0)
+		end
+	end
+end)
