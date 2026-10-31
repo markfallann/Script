@@ -292,24 +292,885 @@ local function getAimPart(char)
 	return char:FindFirstChild(want)
 end
 
-RunService.RenderStepped:Connect(function()
-	if not S.Aim then return end
-	local center = Vector2.new(cam.ViewportSize.X/2, cam.ViewportSize.Y/2)
-	local best, bestDist
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local VirtualUser = game:GetService("VirtualUser")
+
+panel.Size = UDim2.new(0,210,0,340)
+
+local D = {Fly=false, FlySpeed=60, InfJump=false, ClickTP=false, Spectate=false, Tracer=false, Health=false,
+	WallCheck=false, ShowFOV=false, AimRadius=150, Smooth=0.35, CamFOVOn=false, CamFOV=70,
+	JPOn=false, JP=50, GravOn=false, Grav=196.2, AntiAFK=true}
+for k, v in pairs(D) do S[k] = v end
+
+-- save / load
+local FILE = "MarkMenu.json"
+local skip = {Fly=true, Spectate=true, ClickTP=true}
+local function saveCfg()
+	if not writefile then return end
+	local t = {}
+	for k, v in pairs(S) do
+		if not skip[k] and (type(v) == "boolean" or type(v) == "number") then t[k] = v end
+	end
+	pcall(writefile, FILE, HttpService:JSONEncode(t))
+end
+local function loadCfg()
+	if not (isfile and readfile and isfile(FILE)) then return end
+	local ok, t = pcall(function() return HttpService:JSONDecode(readfile(FILE)) end)
+	if ok and type(t) == "table" then
+		for k, v in pairs(t) do
+			if S[k] ~= nil and type(S[k]) == type(v) and not skip[k] then S[k] = v end
+		end
+	end
+end
+loadCfg()
+if writefile then
+	task.spawn(function() while true do task.wait(5) saveCfg() end end)
+end
+
+-- helper UI
+local function tg(label, key, cb)
+	local b = row()
+	local function refresh()
+		b.Text = label .. ": " .. (S[key] and "ON" or "OFF")
+		b.BackgroundColor3 = S[key] and Color3.fromRGB(0,140,70) or Color3.fromRGB(45,45,45)
+	end
+	b.MouseButton1Click:Connect(function()
+		S[key] = not S[key]
+		refresh()
+		if cb then cb(S[key]) end
+	end)
+	refresh()
+end
+
+local function numBox(hint, key, lo, hi)
+	local r = row()
+	r.Text = ""
+	local t = Instance.new("TextBox", r)
+	t.Size = UDim2.new(1,0,1,0)
+	t.BackgroundTransparency = 1
+	t.Text = ""
+	t.PlaceholderText = hint .. ": " .. tostring(S[key])
+	t.TextColor3 = Color3.new(1,1,1)
+	t.Font = Enum.Font.Gotham
+	t.TextSize = 13
+	t.FocusLost:Connect(function()
+		local n = tonumber(t.Text)
+		if n then S[key] = math.clamp(n, lo, hi) end
+		t.PlaceholderText = hint .. ": " .. tostring(S[key])
+		t.Text = ""
+	end)
+end
+
+local function btnRow(text, fn)
+	local b = row()
+	b.Text = text
+	b.MouseButton1Click:Connect(fn)
+	return b
+end
+
+-- overlay (tracer + fov circle)
+local ov = Instance.new("ScreenGui")
+ov.Name = "MarkOverlay"
+ov.ResetOnSpawn = false
+ov.IgnoreGuiInset = true
+ov.DisplayOrder = 5
+ov.Parent = lp:WaitForChild("PlayerGui")
+
+local circle = Instance.new("Frame", ov)
+circle.AnchorPoint = Vector2.new(0.5,0.5)
+circle.Position = UDim2.new(0.5,0,0.5,0)
+circle.BackgroundTransparency = 1
+circle.Visible = false
+Instance.new("UICorner", circle).CornerRadius = UDim.new(1,0)
+local cst = Instance.new("UIStroke", circle)
+cst.Thickness = 1.5
+cst.Color = Color3.new(1,1,1)
+
+-- fly
+local fbv, fbg
+local function stopFly()
+	if fbv then fbv:Destroy() fbv = nil end
+	if fbg then fbg:Destroy() fbg = nil end
+	local h = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+	if h then h.PlatformStand = false end
+end
+local function flyStep()
+	local char = lp.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not (root and hum) then return end
+	if not fbv or fbv.Parent ~= root then
+		stopFly()
+		fbv = Instance.new("BodyVelocity")
+		fbv.MaxForce = Vector3.new(1e9,1e9,1e9)
+		fbv.Velocity = Vector3.zero
+		fbv.Parent = root
+		fbg = Instance.new("BodyGyro")
+		fbg.MaxTorque = Vector3.new(1e9,1e9,1e9)
+		fbg.P = 1e4
+		fbg.Parent = root
+	end
+	hum.PlatformStand = true
+	local md = cam.CFrame:VectorToObjectSpace(hum.MoveDirection)
+	local v = cam.CFrame.RightVector * md.X + cam.CFrame.LookVector * (-md.Z)
+	if UIS:IsKeyDown(Enum.KeyCode.Space) or UIS:IsKeyDown(Enum.KeyCode.E) then v += Vector3.new(0,1,0) end
+	if UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.Q) then v -= Vector3.new(0,1,0) end
+	fbv.Velocity = v * S.FlySpeed
+	fbg.CFrame = cam.CFrame
+end
+
+-- infinite jump
+UIS.JumpRequest:Connect(function()
+	if not S.InfJump then return end
+	local h = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+	if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+end)
+
+-- click tp
+local mouse = lp:GetMouse()
+local function tpTo(pos)
+	local r = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+	if r then r.CFrame = CFrame.new(pos + Vector3.new(0,3,0)) end
+end
+UIS.InputBegan:Connect(function(i, gp)
+	if gp then return end
+	if i.KeyCode == Enum.KeyCode.RightShift then
+		btn.Visible = not btn.Visible
+		if not btn.Visible then panel.Visible = false end
+		return
+	end
+	if S.ClickTP and i.UserInputType == Enum.UserInputType.MouseButton1 then
+		tpTo(mouse.Hit.Position)
+	end
+end)
+UIS.TouchTapInWorld:Connect(function(_, gp)
+	if not gp and S.ClickTP then tpTo(mouse.Hit.Position) end
+end)
+
+-- pilih player / tp / spectate
+local selected
+local function applySpectate()
+	if S.Spectate and selected and selected.Character then
+		local h = selected.Character:FindFirstChildOfClass("Humanoid")
+		if h then cam.CameraSubject = h return end
+	end
+	local mh = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+	if mh then cam.CameraSubject = mh end
+end
+
+local listF = Instance.new("ScrollingFrame", gui)
+listF.Size = UDim2.new(0,150,0,200)
+listF.BackgroundColor3 = Color3.fromRGB(25,25,25)
+listF.BorderSizePixel = 0
+listF.Visible = false
+listF.CanvasSize = UDim2.new(0,0,0,0)
+listF.AutomaticCanvasSize = Enum.AutomaticSize.Y
+listF.ScrollBarThickness = 4
+Instance.new("UICorner", listF).CornerRadius = UDim.new(0,8)
+local ll = Instance.new("UIListLayout", listF)
+ll.Padding = UDim.new(0,3)
+
+local selRow
+local function fillList()
+	for _, c in ipairs(listF:GetChildren()) do
+		if c:IsA("TextButton") then c:Destroy() end
+	end
 	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= lp and p.Character and not (S.TeamCheck and p.Team and p.Team == lp.Team) then
-			local hum = p.Character:FindFirstChildOfClass("Humanoid")
-			local part = getAimPart(p.Character)
+		if p ~= lp then
+			local b = Instance.new("TextButton", listF)
+			b.Size = UDim2.new(1,-8,0,26)
+			b.Text = p.DisplayName
+			b.BackgroundColor3 = Color3.fromRGB(45,45,45)
+			b.TextColor3 = Color3.new(1,1,1)
+			b.Font = Enum.Font.Gotham
+			b.TextSize = 12
+			Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
+			b.MouseButton1Click:Connect(function()
+				selected = p
+				selRow.Text = "Pilih Player: " .. p.DisplayName
+				listF.Visible = false
+				if S.Spectate then applySpectate() end
+			end)
+		end
+	end
+end
+
+-- tracer + health
+local lines, hp = {}, {}
+local function getLine(p)
+	local l = lines[p]
+	if not l then
+		l = Instance.new("Frame")
+		l.AnchorPoint = Vector2.new(0.5,0.5)
+		l.BorderSizePixel = 0
+		l.Visible = false
+		l.Parent = ov
+		lines[p] = l
+	end
+	return l
+end
+
+local function getHP(p, char)
+	local h = hp[p]
+	if h and h.char == char and h.bb.Parent then return h end
+	if h then h.bb:Destroy() end
+	local head = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+	if not head then return nil end
+	local bb = Instance.new("BillboardGui")
+	bb.Adornee = head
+	bb.Size = UDim2.new(0,90,0,26)
+	bb.StudsOffset = Vector3.new(0,4.3,0)
+	bb.AlwaysOnTop = true
+	bb.Parent = espFolder
+	local bg = Instance.new("Frame", bb)
+	bg.Size = UDim2.new(1,0,0,5)
+	bg.BackgroundColor3 = Color3.new(0,0,0)
+	bg.BorderSizePixel = 0
+	local fill = Instance.new("Frame", bg)
+	fill.Size = UDim2.new(1,0,1,0)
+	fill.BorderSizePixel = 0
+	local tl = Instance.new("TextLabel", bb)
+	tl.Size = UDim2.new(1,0,0,16)
+	tl.Position = UDim2.new(0,0,0,7)
+	tl.BackgroundTransparency = 1
+	tl.Font = Enum.Font.GothamBold
+	tl.TextSize = 12
+	tl.TextColor3 = Color3.new(1,1,1)
+	tl.TextStrokeTransparency = 0
+	h = {char=char, bb=bb, fill=fill, tl=tl}
+	hp[p] = h
+	return h
+end
+
+Players.PlayerRemoving:Connect(function(p)
+	if lines[p] then lines[p]:Destroy() lines[p] = nil end
+	if hp[p] then hp[p].bb:Destroy() hp[p] = nil end
+	if selected == p then selected = nil selRow.Text = "Pilih Player: -" end
+end)
+
+local function tracerStep()
+	local vp = cam.ViewportSize
+	local a = Vector2.new(vp.X/2, vp.Y)
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= lp then
+			local root = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+			if S.Tracer and root then
+				local l = getLine(p)
+				local pos, on = cam:WorldToViewportPoint(root.Position)
+				if on then
+					local b = Vector2.new(pos.X, pos.Y)
+					local d = b - a
+					l.Size = UDim2.new(0, d.Magnitude, 0, 1.5)
+					l.Position = UDim2.new(0, (a.X+b.X)/2, 0, (a.Y+b.Y)/2)
+					l.Rotation = math.deg(math.atan2(d.Y, d.X))
+					l.BackgroundColor3 = teamColor(p)
+					l.Visible = true
+				else
+					l.Visible = false
+				end
+			elseif lines[p] then
+				lines[p].Visible = false
+			end
+		end
+	end
+end
+
+local function healthStep()
+	local myRoot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= lp then
+			local char = p.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			if S.Health and hum then
+				local h = getHP(p, char)
+				if h then
+					local frac = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+					h.bb.Enabled = true
+					h.fill.Size = UDim2.new(frac,0,1,0)
+					h.fill.BackgroundColor3 = Color3.fromRGB(255,0,0):Lerp(Color3.fromRGB(0,255,0), frac)
+					local root = char:FindFirstChild("HumanoidRootPart")
+					local dist = (root and myRoot) and math.floor((root.Position - myRoot.Position).Magnitude) or 0
+					h.tl.Text = math.floor(hum.Health) .. " HP | " .. dist .. "m"
+				end
+			elseif hp[p] then
+				hp[p].bb.Enabled = false
+			end
+		end
+	end
+end
+
+-- auto aim baru (fov circle + smooth + wall check)
+local rp = RaycastParams.new()
+rp.FilterType = Enum.RaycastFilterType.Exclude
+local function visible(part, char)
+	rp.FilterDescendantsInstances = {lp.Character, char}
+	return workspace:Raycast(cam.CFrame.Position, part.Position - cam.CFrame.Position, rp) == nil
+end
+
+local function aimStep()
+	if not S.Aim then return end
+	local center = cam.ViewportSize / 2
+	local best, bestD
+	for _, p in ipairs(Players:GetPlayers()) do
+		local char = p.Character
+		if p ~= lp and char and not (S.TeamCheck and p.Team and p.Team == lp.Team) then
+			local hum = char:FindFirstChildOfClass("Humanoid")
+			local part = getAimPart(char)
 			if hum and hum.Health > 0 and part then
 				local pos, on = cam:WorldToViewportPoint(part.Position)
 				if on then
 					local d = (Vector2.new(pos.X, pos.Y) - center).Magnitude
-					if not bestDist or d < bestDist then best, bestDist = part, d end
+					if d <= S.AimRadius and (not bestD or d < bestD) and (not S.WallCheck or visible(part, char)) then
+						best, bestD = part, d
+					end
 				end
 			end
 		end
 	end
 	if best then
-		cam.CFrame = CFrame.lookAt(cam.CFrame.Position, best.Position)
+		cam.CFrame = cam.CFrame:Lerp(CFrame.lookAt(cam.CFrame.Position, best.Position), math.clamp(S.Smooth, 0.01, 1))
+	end
+end
+
+-- anti afk
+lp.Idled:Connect(function()
+	if S.AntiAFK then
+		VirtualUser:CaptureController()
+		VirtualUser:ClickButton2(Vector2.new())
+	end
+end)
+
+-- menu rows
+tg("Fly", "Fly", function(v) if not v then stopFly() end end)
+numBox("Fly Speed", "FlySpeed", 1, 500)
+tg("Infinite Jump", "InfJump")
+tg("Click TP", "ClickTP")
+
+selRow = btnRow("Pilih Player: -", function()
+	fillList()
+	listF.Position = UDim2.new(0, panel.AbsolutePosition.X + panel.AbsoluteSize.X + 6, 0, panel.AbsolutePosition.Y)
+	listF.Visible = not listF.Visible
+end)
+btnRow("Teleport ke Player", function()
+	local my = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+	local tr = selected and selected.Character and selected.Character:FindFirstChild("HumanoidRootPart")
+	if my and tr then my.CFrame = tr.CFrame * CFrame.new(0,0,3) end
+end)
+tg("Spectate", "Spectate", applySpectate)
+
+tg("ESP Tracer", "Tracer")
+tg("ESP Health+Jarak", "Health")
+
+tg("FOV Circle", "ShowFOV")
+numBox("Radius FOV", "AimRadius", 20, 800)
+numBox("Smooth 0.01-1", "Smooth", 0.01, 1)
+tg("Wall Check", "WallCheck")
+
+tg("Cam FOV", "CamFOVOn")
+numBox("Cam FOV", "CamFOV", 30, 120)
+tg("Jump Power", "JPOn")
+numBox("Jump Power", "JP", 0, 500)
+tg("Gravity", "GravOn")
+numBox("Gravity", "Grav", 0, 500)
+tg("Anti AFK", "AntiAFK")
+
+btnRow("Rejoin", function()
+	if #Players:GetPlayers() > 1 then
+		TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, lp)
+	else
+		TeleportService:Teleport(game.PlaceId, lp)
+	end
+end)
+btnRow("Server Hop", function()
+	local ok, res = pcall(function()
+		return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"))
+	end)
+	if ok and res and res.data then
+		for _, s in ipairs(res.data) do
+			if s.id ~= game.JobId and s.playing < s.maxPlayers then
+				TeleportService:TeleportToPlaceInstance(game.PlaceId, s.id, lp)
+				return
+			end
+		end
+	end
+	TeleportService:Teleport(game.PlaceId, lp)
+end)
+
+-- sinkron tombol lama dengan setting yang di-load
+local oldMap = {["ESP Player"]="Player", ["ESP Nama"]="Name", ["ESP Part"]="Part", ["Noclip"]="Noclip",
+	["Speed"]="Speed", ["Auto Aim"]="Aim", ["Cek Team (Aim)"]="TeamCheck", ["Fullbright"]="Fullbright", ["No Fog"]="NoFog"}
+for _, c in ipairs(panel:GetChildren()) do
+	if c:IsA("TextButton") then
+		local label = c.Text:match("^(.-): ON$") or c.Text:match("^(.-): OFF$")
+		local key = label and oldMap[label]
+		if key then
+			c.Text = label .. ": " .. (S[key] and "ON" or "OFF")
+			c.BackgroundColor3 = S[key] and Color3.fromRGB(0,140,70) or Color3.fromRGB(45,45,45)
+		end
+	end
+end
+refreshPart()
+
+-- loop utama
+local origGrav = workspace.Gravity
+local wasJP, wasG, wasFOV = false, false, false
+RunService.RenderStepped:Connect(function()
+	circle.Visible = S.ShowFOV
+	circle.Size = UDim2.new(0, S.AimRadius * 2, 0, S.AimRadius * 2)
+
+	if S.Fly then flyStep() end
+	aimStep()
+	tracerStep()
+	healthStep()
+
+	if S.Spectate and selected and selected.Character then
+		local h = selected.Character:FindFirstChildOfClass("Humanoid")
+		if h and cam.CameraSubject ~= h then cam.CameraSubject = h end
+	end
+
+	if S.CamFOVOn then
+		wasFOV = true
+		cam.FieldOfView = S.CamFOV
+	elseif wasFOV then
+		wasFOV = false
+		cam.FieldOfView = 70
+	end
+
+	if S.GravOn then
+		wasG = true
+		workspace.Gravity = S.Grav
+	elseif wasG then
+		wasG = false
+		workspace.Gravity = origGrav
+	end
+
+	local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+	if hum then
+		if S.JPOn then
+			wasJP = true
+			hum.UseJumpPower = true
+			hum.JumpPower = S.JP
+		elseif wasJP then
+			wasJP = false
+			hum.JumpPower = 50
+		end
+	end
+end)
+local TextChatService = game:GetService("TextChatService")
+
+btnRow("Hide Menu (chat ;show)", function()
+	panel.Visible = false
+	if listF then listF.Visible = false end
+	btn.Visible = false
+end)
+
+local function onChat(msg)
+	if (msg:lower():gsub("%s", "")) == ";show" then
+		btn.Visible = true
+	end
+end
+
+lp.Chatted:Connect(onChat)
+
+pcall(function()
+	TextChatService.MessageReceived:Connect(function(m)
+		if m.TextSource and m.TextSource.UserId == lp.UserId then
+			onChat(m.Text)
+		end
+	end)
+end)
+local okV, VIM = pcall(function() return game:GetService("VirtualInputManager") end)
+local mouse2 = lp:GetMouse()
+
+local S2 = {Freecam=false, FCSpeed=50, Zoom=false, ZoomFOV=30, ClickOn=false, ClickDelay=0.5, ClickLoop=true,
+	Pick=false, Slide=false, SlideSpeed=40, SlideLoop=false}
+local R = {}
+
+-- ===== MENU 2 =====
+local g2 = Instance.new("ScreenGui")
+g2.Name = "MarkMenu2"
+g2.ResetOnSpawn = false
+g2.IgnoreGuiInset = true
+g2.DisplayOrder = 8
+g2.Enabled = false
+g2.Parent = lp:WaitForChild("PlayerGui")
+
+local m2 = Instance.new("Frame", g2)
+m2.Size = UDim2.new(0,220,0,340)
+m2.Position = UDim2.new(1,-230,0,60)
+m2.BackgroundColor3 = Color3.fromRGB(25,25,25)
+m2.BorderSizePixel = 0
+Instance.new("UICorner", m2).CornerRadius = UDim.new(0,8)
+
+local title = Instance.new("TextLabel", m2)
+title.Size = UDim2.new(1,0,0,28)
+title.BackgroundColor3 = Color3.fromRGB(40,40,40)
+title.BorderSizePixel = 0
+title.Text = "Mark Cam  [F6 / F7 / F8]"
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 13
+Instance.new("UICorner", title).CornerRadius = UDim.new(0,8)
+drag(title, m2)
+
+local body = Instance.new("ScrollingFrame", m2)
+body.Position = UDim2.new(0,0,0,32)
+body.Size = UDim2.new(1,0,1,-34)
+body.BackgroundTransparency = 1
+body.BorderSizePixel = 0
+body.CanvasSize = UDim2.new(0,0,0,0)
+body.AutomaticCanvasSize = Enum.AutomaticSize.Y
+body.ScrollBarThickness = 4
+local bl = Instance.new("UIListLayout", body)
+bl.Padding = UDim.new(0,4)
+bl.SortOrder = Enum.SortOrder.LayoutOrder
+bl.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+local ord2 = 0
+local function row2(h)
+	ord2 += 1
+	local f = Instance.new("TextButton")
+	f.Size = UDim2.new(1,-12,0,h or 28)
+	f.LayoutOrder = ord2
+	f.BackgroundColor3 = Color3.fromRGB(45,45,45)
+	f.TextColor3 = Color3.new(1,1,1)
+	f.Font = Enum.Font.Gotham
+	f.TextSize = 13
+	Instance.new("UICorner", f).CornerRadius = UDim.new(0,6)
+	f.Parent = body
+	return f
+end
+
+local function t2(label, key, cb)
+	local b = row2()
+	local function paint()
+		local v = S2[key]
+		b.Text = label .. ": " .. (v and "ON" or "OFF")
+		b.BackgroundColor3 = v and Color3.fromRGB(0,140,70) or Color3.fromRGB(45,45,45)
+	end
+	local function setV(v)
+		S2[key] = v
+		paint()
+		if cb then cb(v) end
+	end
+	b.MouseButton1Click:Connect(function() setV(not S2[key]) end)
+	paint()
+	return setV
+end
+
+local function numBox2(hint, key, lo, hi)
+	local r = row2()
+	r.Text = ""
+	local t = Instance.new("TextBox", r)
+	t.Size = UDim2.new(1,0,1,0)
+	t.BackgroundTransparency = 1
+	t.Text = ""
+	t.PlaceholderText = hint .. ": " .. tostring(S2[key])
+	t.TextColor3 = Color3.new(1,1,1)
+	t.Font = Enum.Font.Gotham
+	t.TextSize = 13
+	t.FocusLost:Connect(function()
+		local n = tonumber(t.Text)
+		if n then S2[key] = math.clamp(n, lo, hi) end
+		t.PlaceholderText = hint .. ": " .. tostring(S2[key])
+		t.Text = ""
+	end)
+end
+
+local function b2(text, fn)
+	local b = row2()
+	b.Text = text
+	b.MouseButton1Click:Connect(fn)
+	return b
+end
+
+local function sep(text)
+	local b = row2(22)
+	b.Text = text
+	b.AutoButtonColor = false
+	b.BackgroundColor3 = Color3.fromRGB(20,20,20)
+	b.TextColor3 = Color3.fromRGB(150,150,150)
+	return b
+end
+
+-- ===== FREECAM + ZOOM =====
+local FC = {on=false, pos=Vector3.zero, yaw=0, pitch=0}
+local saved = {}
+local touchD = Vector2.zero
+local zoomActive = false
+local fovSaved = 70
+
+local function startFreecam()
+	if FC.on then return end
+	local cf = cam.CFrame
+	FC.pos = cf.Position
+	local rx, ry = cf:ToOrientation()
+	FC.pitch, FC.yaw = rx, ry
+	saved.aim = S.Aim
+	S.Aim = false
+	local root = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+	saved.root = root
+	if root then saved.anch = root.Anchored root.Anchored = true end
+	cam.CameraType = Enum.CameraType.Scriptable
+	FC.on = true
+end
+
+local function stopFreecam()
+	if not FC.on then return end
+	FC.on = false
+	UIS.MouseBehavior = Enum.MouseBehavior.Default
+	cam.CameraType = Enum.CameraType.Custom
+	if saved.root then saved.root.Anchored = saved.anch or false end
+	S.Aim = saved.aim or false
+	local h = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+	if h then cam.CameraSubject = h end
+end
+
+UIS.InputChanged:Connect(function(i, gp)
+	if i.UserInputType == Enum.UserInputType.MouseWheel then
+		if S2.Zoom and not gp then S2.ZoomFOV = math.clamp(S2.ZoomFOV - i.Position.Z * 3, 5, 120) end
+	elseif i.UserInputType == Enum.UserInputType.Touch and FC.on and not gp then
+		touchD += Vector2.new(i.Delta.X, i.Delta.Y)
+	end
+end)
+
+RunService.RenderStepped:Connect(function(dt)
+	if FC.on then
+		if UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+			UIS.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
+			local d = UIS:GetMouseDelta()
+			FC.yaw -= math.rad(d.X * 0.25)
+			FC.pitch = math.clamp(FC.pitch - math.rad(d.Y * 0.25), -1.5, 1.5)
+		else
+			UIS.MouseBehavior = Enum.MouseBehavior.Default
+		end
+		if touchD.Magnitude > 0 then
+			FC.yaw -= math.rad(touchD.X * 0.3)
+			FC.pitch = math.clamp(FC.pitch - math.rad(touchD.Y * 0.3), -1.5, 1.5)
+			touchD = Vector2.zero
+		end
+		local cf = CFrame.new(FC.pos) * CFrame.fromOrientation(FC.pitch, FC.yaw, 0)
+		local mv = Vector3.zero
+		if UIS.KeyboardEnabled then
+			if not UIS:GetFocusedTextBox() then
+				if UIS:IsKeyDown(Enum.KeyCode.W) then mv += cf.LookVector end
+				if UIS:IsKeyDown(Enum.KeyCode.S) then mv -= cf.LookVector end
+				if UIS:IsKeyDown(Enum.KeyCode.D) then mv += cf.RightVector end
+				if UIS:IsKeyDown(Enum.KeyCode.A) then mv -= cf.RightVector end
+				if UIS:IsKeyDown(Enum.KeyCode.E) then mv += Vector3.new(0,1,0) end
+				if UIS:IsKeyDown(Enum.KeyCode.Q) then mv -= Vector3.new(0,1,0) end
+			end
+		else
+			local h = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+			if h then
+				local md = cf:VectorToObjectSpace(h.MoveDirection)
+				mv = cf.RightVector * md.X + cf.LookVector * (-md.Z)
+			end
+		end
+		local spd = S2.FCSpeed * (UIS:IsKeyDown(Enum.KeyCode.LeftShift) and 3 or 1)
+		FC.pos += mv * spd * dt
+		cam.CFrame = CFrame.new(FC.pos) * CFrame.fromOrientation(FC.pitch, FC.yaw, 0)
+	end
+	if S2.Zoom then cam.FieldOfView = S2.ZoomFOV end
+end)
+
+-- ===== AUTO CLICK =====
+local points = {}
+local acToken = 0
+
+local function updateMarkers()
+	for _, m in ipairs(points) do
+		m.Visible = g2.Enabled and not S2.ClickOn
+	end
+end
+
+local function addPoint()
+	local m = Instance.new("TextButton", ov)
+	m.AnchorPoint = Vector2.new(0.5,0.5)
+	m.Size = UDim2.new(0,34,0,34)
+	m.Position = UDim2.new(0.5, #points * 16, 0.5, #points * 16)
+	m.BackgroundColor3 = Color3.fromRGB(255,60,60)
+	m.BackgroundTransparency = 0.25
+	m.TextColor3 = Color3.new(1,1,1)
+	m.Font = Enum.Font.GothamBold
+	m.TextSize = 16
+	m.AutoButtonColor = false
+	m.ZIndex = 10
+	Instance.new("UICorner", m).CornerRadius = UDim.new(1,0)
+	table.insert(points, m)
+	m.Text = tostring(#points)
+	drag(m, m)
+	updateMarkers()
+end
+
+local function doClick(x, y)
+	local ok = okV and pcall(function()
+		VIM:SendMouseButtonEvent(x, y, 0, true, game, 0)
+		task.wait(0.03)
+		VIM:SendMouseButtonEvent(x, y, 0, false, game, 0)
+	end)
+	if not ok and mousemoveabs and mouse1click then
+		pcall(function() mousemoveabs(x, y) mouse1click() end)
+	end
+end
+
+local function startClick()
+	acToken += 1
+	local my = acToken
+	task.spawn(function()
+		while S2.ClickOn and acToken == my and #points > 0 do
+			for _, m in ipairs(points) do
+				if not (S2.ClickOn and acToken == my) then break end
+				if m.Parent then
+					local c = m.AbsolutePosition + m.AbsoluteSize / 2
+					doClick(c.X, c.Y)
+				end
+				task.wait(math.max(S2.ClickDelay, 0.02))
+			end
+			if not S2.ClickLoop then break end
+		end
+		if acToken == my and S2.ClickOn then R.Click(false) end
+	end)
+end
+
+-- ===== SLIDE =====
+local wps = {}
+local slideIdx = 1
+local wpFolder = Instance.new("Folder")
+wpFolder.Name = "MarkSlide"
+wpFolder.Parent = workspace
+
+local function addWP(pos)
+	local p = Instance.new("Part")
+	p.Shape = Enum.PartType.Ball
+	p.Size = Vector3.new(1.5,1.5,1.5)
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.Material = Enum.Material.Neon
+	p.Color = Color3.fromRGB(0,200,255)
+	p.Position = pos + Vector3.new(0,1.5,0)
+	p.Parent = wpFolder
+	local bb = Instance.new("BillboardGui", p)
+	bb.Size = UDim2.new(0,30,0,30)
+	bb.StudsOffset = Vector3.new(0,1.5,0)
+	bb.AlwaysOnTop = true
+	local tl = Instance.new("TextLabel", bb)
+	tl.Size = UDim2.new(1,0,1,0)
+	tl.BackgroundTransparency = 1
+	tl.Font = Enum.Font.GothamBold
+	tl.TextSize = 18
+	tl.TextColor3 = Color3.new(1,1,1)
+	tl.TextStrokeTransparency = 0
+	tl.Text = tostring(#wps + 1)
+	table.insert(wps, p)
+end
+
+UIS.InputBegan:Connect(function(i, gp)
+	if gp then return end
+	if S2.Pick and i.UserInputType == Enum.UserInputType.MouseButton1 and mouse2.Target then
+		addWP(mouse2.Hit.Position)
+	end
+end)
+UIS.TouchTapInWorld:Connect(function(_, gp)
+	if not gp and S2.Pick and mouse2.Target then addWP(mouse2.Hit.Position) end
+end)
+
+RunService.Heartbeat:Connect(function(dt)
+	if not S2.Slide then return end
+	if #wps == 0 then R.Slide(false) return end
+	local root = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+	local target = wps[slideIdx]
+	if not (root and target) then return end
+	local tpos = target.Position + Vector3.new(0,1.5,0)
+	local cur = root.Position
+	local diff = tpos - cur
+	local dist = diff.Magnitude
+	local step = S2.SlideSpeed * dt
+	local newPos = dist <= step and tpos or cur + diff.Unit * step
+	local flat = Vector3.new(diff.X, 0, diff.Z)
+	if flat.Magnitude > 0.05 then
+		root.CFrame = CFrame.lookAt(newPos, newPos + flat)
+	else
+		root.CFrame = CFrame.new(newPos)
+	end
+	root.AssemblyLinearVelocity = Vector3.zero
+	if dist <= step then
+		slideIdx += 1
+		if slideIdx > #wps then
+			if S2.SlideLoop then slideIdx = 1 else R.Slide(false) end
+		end
+	end
+end)
+
+-- ===== ISI MENU 2 =====
+R.Freecam = t2("Freecam", "Freecam", function(v)
+	if v then startFreecam() else stopFreecam() end
+end)
+numBox2("Cam Speed", "FCSpeed", 1, 500)
+R.Zoom = t2("Zoom (scroll)", "Zoom", function(v)
+	if v and not zoomActive then
+		zoomActive = true
+		fovSaved = cam.FieldOfView
+	elseif not v and zoomActive then
+		zoomActive = false
+		cam.FieldOfView = fovSaved
+	end
+end)
+numBox2("Zoom FOV", "ZoomFOV", 5, 120)
+
+sep("— AUTO CLICK —")
+b2("+ Tambah Lokasi (geser titik)", addPoint)
+b2("Hapus Lokasi Terakhir", function()
+	local m = table.remove(points)
+	if m then m:Destroy() end
+end)
+b2("Hapus Semua Lokasi", function()
+	for _, m in ipairs(points) do m:Destroy() end
+	table.clear(points)
+end)
+numBox2("Delay Klik (detik)", "ClickDelay", 0.02, 60)
+t2("Loop Klik", "ClickLoop")
+R.Click = t2("Auto Click (F7)", "ClickOn", function(v)
+	if v then startClick() else acToken += 1 end
+	updateMarkers()
+end)
+
+sep("— SLIDE —")
+t2("Pilih Area (tap map)", "Pick")
+b2("Hapus Titik Terakhir", function()
+	local p = table.remove(wps)
+	if p then p:Destroy() end
+end)
+b2("Hapus Semua Titik", function()
+	for _, p in ipairs(wps) do p:Destroy() end
+	table.clear(wps)
+end)
+numBox2("Slide Speed", "SlideSpeed", 1, 500)
+t2("Loop Slide", "SlideLoop")
+R.Slide = t2("Slide (F8)", "Slide", function(v)
+	if v then slideIdx = 1 end
+end)
+
+-- ===== SHORTCUT =====
+local function setCamMode(on)
+	g2.Enabled = on
+	R.Freecam(on)
+	R.Zoom(on)
+	updateMarkers()
+end
+
+btnRow("Menu Cam (F6)", function() setCamMode(not g2.Enabled) end)
+
+UIS.InputBegan:Connect(function(i, gp)
+	if gp then return end
+	if i.KeyCode == Enum.KeyCode.F6 then
+		setCamMode(not g2.Enabled)
+	elseif i.KeyCode == Enum.KeyCode.F7 then
+		R.Click(not S2.ClickOn)
+	elseif i.KeyCode == Enum.KeyCode.F8 then
+		R.Slide(not S2.Slide)
 	end
 end)
