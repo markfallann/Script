@@ -1,0 +1,271 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local Teams = game:GetService("Teams")
+
+local lp = Players.LocalPlayer
+local cam = workspace.CurrentCamera
+
+local S = {Player=false, Name=false, Part=false, Noclip=false, Speed=false, Aim=false, TeamCheck=true, SpeedVal=16, AimIdx=1}
+local AimParts = {"Head", "Torso", "HumanoidRootPart"}
+
+-- warna per team: 1 putih, 2 merah, 3 biru, 4 hijau, dst
+local palette = {
+	Color3.fromRGB(255,255,255), Color3.fromRGB(255,0,0), Color3.fromRGB(0,100,255),
+	Color3.fromRGB(0,255,0), Color3.fromRGB(255,255,0), Color3.fromRGB(255,128,0),
+	Color3.fromRGB(170,0,255), Color3.fromRGB(0,255,255),
+}
+local function teamColor(p)
+	if not p.Team then return palette[1] end
+	for i, t in ipairs(Teams:GetTeams()) do
+		if t == p.Team then return palette[((i - 1) % #palette) + 1] end
+	end
+	return palette[1]
+end
+
+-- GUI
+local gui = Instance.new("ScreenGui")
+gui.Name = "MarkMenu"
+gui.ResetOnSpawn = false
+gui.Parent = lp:WaitForChild("PlayerGui")
+
+local espFolder = Instance.new("Folder", gui)
+espFolder.Name = "ESP"
+
+local btn = Instance.new("TextButton", gui)
+btn.Size = UDim2.new(0,36,0,36)
+btn.Position = UDim2.new(0,10,0,10)
+btn.Text = "M"
+btn.Font = Enum.Font.GothamBold
+btn.TextSize = 18
+btn.TextColor3 = Color3.new(1,1,1)
+btn.BackgroundColor3 = Color3.fromRGB(30,30,30)
+Instance.new("UICorner", btn).CornerRadius = UDim.new(0,8)
+
+local panel = Instance.new("ScrollingFrame", gui)
+panel.Size = UDim2.new(0,200,0,300)
+panel.Position = UDim2.new(0,10,0,52)
+panel.BackgroundColor3 = Color3.fromRGB(25,25,25)
+panel.BorderSizePixel = 0
+panel.Visible = false
+panel.CanvasSize = UDim2.new(0,0,0,0)
+panel.AutomaticCanvasSize = Enum.AutomaticSize.Y
+panel.ScrollBarThickness = 4
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0,8)
+local lay = Instance.new("UIListLayout", panel)
+lay.Padding = UDim.new(0,4)
+lay.SortOrder = Enum.SortOrder.LayoutOrder
+Instance.new("UIPadding", panel).PaddingTop = UDim.new(0,6)
+
+-- drag
+local function drag(handle, target)
+	local dragging, start, startPos
+	handle.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = true; start = i.Position; startPos = target.Position
+			i.Changed:Connect(function()
+				if i.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+	UIS.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			local d = i.Position - start
+			target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		end
+	end)
+end
+drag(btn, btn)
+
+local moved = false
+btn.MouseButton1Click:Connect(function()
+	panel.Position = UDim2.new(0, btn.Position.X.Offset, 0, btn.Position.Y.Offset + 42)
+	panel.Visible = not panel.Visible
+end)
+
+local order = 0
+local function row(h)
+	order += 1
+	local f = Instance.new("TextButton")
+	f.Size = UDim2.new(1,-12,0,h or 28)
+	f.LayoutOrder = order
+	f.BackgroundColor3 = Color3.fromRGB(45,45,45)
+	f.TextColor3 = Color3.new(1,1,1)
+	f.Font = Enum.Font.Gotham
+	f.TextSize = 13
+	f.AutoButtonColor = true
+	Instance.new("UICorner", f).CornerRadius = UDim.new(0,6)
+	f.Parent = panel
+	return f
+end
+
+local function toggle(label, key)
+	local b = row()
+	local function refresh()
+		b.Text = label .. ": " .. (S[key] and "ON" or "OFF")
+		b.BackgroundColor3 = S[key] and Color3.fromRGB(0,140,70) or Color3.fromRGB(45,45,45)
+	end
+	b.MouseButton1Click:Connect(function() S[key] = not S[key]; refresh() end)
+	refresh()
+end
+
+toggle("ESP Player", "Player")
+toggle("ESP Nama", "Name")
+toggle("ESP Part", "Part")
+toggle("Noclip", "Noclip")
+toggle("Speed", "Speed")
+
+local sb = row()
+sb.Text = ""
+local tb = Instance.new("TextBox", sb)
+tb.Size = UDim2.new(1,0,1,0)
+tb.BackgroundTransparency = 1
+tb.PlaceholderText = "Ketik speed lalu Enter"
+tb.Text = ""
+tb.TextColor3 = Color3.new(1,1,1)
+tb.Font = Enum.Font.Gotham
+tb.TextSize = 13
+tb.ClearTextOnFocus = true
+tb.FocusLost:Connect(function()
+	local n = tonumber(tb.Text)
+	if n then S.SpeedVal = math.clamp(n, 0, 1000); tb.PlaceholderText = "Speed: " .. S.SpeedVal end
+	tb.Text = ""
+end)
+
+toggle("Auto Aim", "Aim")
+toggle("Cek Team (Aim)", "TeamCheck")
+
+local pb = row()
+local function refreshPart() pb.Text = "Target Aim: " .. AimParts[S.AimIdx] end
+pb.MouseButton1Click:Connect(function()
+	S.AimIdx = S.AimIdx % #AimParts + 1
+	refreshPart()
+end)
+refreshPart()
+
+-- ESP
+local cache = {}
+local function clear(p)
+	local c = cache[p]
+	if c then for _, o in ipairs(c.objs) do o:Destroy() end cache[p] = nil end
+end
+
+local function build(p, char)
+	clear(p)
+	local objs = {}
+	local hl = Instance.new("Highlight")
+	hl.Adornee = char
+	hl.FillTransparency = 0.5
+	hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	hl.Parent = espFolder
+	table.insert(objs, hl)
+
+	local head = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+	local bb = Instance.new("BillboardGui")
+	bb.Adornee = head
+	bb.Size = UDim2.new(0,120,0,20)
+	bb.StudsOffset = Vector3.new(0,2.5,0)
+	bb.AlwaysOnTop = true
+	bb.Parent = espFolder
+	table.insert(objs, bb)
+	local tl = Instance.new("TextLabel", bb)
+	tl.Size = UDim2.new(1,0,1,0)
+	tl.BackgroundTransparency = 1
+	tl.Font = Enum.Font.GothamBold
+	tl.TextSize = 14
+	tl.TextStrokeTransparency = 0
+	tl.Text = p.DisplayName
+
+	local boxes = {}
+	for _, part in ipairs(char:GetChildren()) do
+		if part:IsA("BasePart") then
+			local b = Instance.new("BoxHandleAdornment")
+			b.Adornee = part
+			b.Size = part.Size
+			b.AlwaysOnTop = true
+			b.ZIndex = 5
+			b.Transparency = 0.5
+			b.Parent = espFolder
+			table.insert(objs, b)
+			table.insert(boxes, b)
+		end
+	end
+	cache[p] = {char=char, hl=hl, bb=bb, tl=tl, boxes=boxes, objs=objs}
+end
+
+local acc = 0
+RunService.Heartbeat:Connect(function(dt)
+	acc += dt
+	if acc < 0.15 then return end
+	acc = 0
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= lp then
+			local char = p.Character
+			if char and char.Parent then
+				local c = cache[p]
+				if not c or c.char ~= char then build(p, char); c = cache[p] end
+				local col = teamColor(p)
+				c.hl.Enabled = S.Player
+				c.hl.FillColor = col
+				c.hl.OutlineColor = col
+				c.bb.Enabled = S.Name
+				c.tl.TextColor3 = col
+				c.tl.Text = p.DisplayName .. " [" .. (p.Team and p.Team.Name or "No Team") .. "]"
+				for _, b in ipairs(c.boxes) do
+					b.Visible = S.Part
+					b.Color3 = col
+				end
+			else
+				clear(p)
+			end
+		end
+	end
+end)
+Players.PlayerRemoving:Connect(clear)
+
+-- noclip + speed
+RunService.Stepped:Connect(function()
+	local char = lp.Character
+	if not char then return end
+	if S.Noclip then
+		for _, v in ipairs(char:GetDescendants()) do
+			if v:IsA("BasePart") then v.CanCollide = false end
+		end
+	end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		if S.Speed then hum.WalkSpeed = S.SpeedVal
+		elseif hum.WalkSpeed == S.SpeedVal and S.SpeedVal ~= 16 then hum.WalkSpeed = 16 end
+	end
+end)
+
+-- auto aim
+local function getAimPart(char)
+	local want = AimParts[S.AimIdx]
+	if want == "Torso" then
+		return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+	end
+	return char:FindFirstChild(want)
+end
+
+RunService.RenderStepped:Connect(function()
+	if not S.Aim then return end
+	local center = Vector2.new(cam.ViewportSize.X/2, cam.ViewportSize.Y/2)
+	local best, bestDist
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= lp and p.Character and not (S.TeamCheck and p.Team and p.Team == lp.Team) then
+			local hum = p.Character:FindFirstChildOfClass("Humanoid")
+			local part = getAimPart(p.Character)
+			if hum and hum.Health > 0 and part then
+				local pos, on = cam:WorldToViewportPoint(part.Position)
+				if on then
+					local d = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+					if not bestDist or d < bestDist then best, bestDist = part, d end
+				end
+			end
+		end
+	end
+	if best then
+		cam.CFrame = CFrame.lookAt(cam.CFrame.Position, best.Position)
+	end
+end)
