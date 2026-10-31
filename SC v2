@@ -231,7 +231,51 @@ RunService.Stepped:Connect(function()
 		for _, v in ipairs(char:GetDescendants()) do
 			if v:IsA("BasePart") then v.CanCollide = false end
 		end
+	endlocal Lighting = game:GetService("Lighting")
+local origL = {
+	Brightness = Lighting.Brightness, ClockTime = Lighting.ClockTime,
+	Ambient = Lighting.Ambient, OutdoorAmbient = Lighting.OutdoorAmbient,
+	GlobalShadows = Lighting.GlobalShadows,
+	FogStart = Lighting.FogStart, FogEnd = Lighting.FogEnd,
+}
+local atmo = Lighting:FindFirstChildOfClass("Atmosphere")
+local origDensity = atmo and atmo.Density
+local wasFB, wasNF = false, false
+
+S.Fullbright = false
+S.NoFog = false
+toggle("Fullbright", "Fullbright")
+toggle("No Fog", "NoFog")
+
+RunService.RenderStepped:Connect(function()
+	if S.Fullbright then
+		wasFB = true
+		Lighting.Brightness = 2
+		Lighting.ClockTime = 14
+		Lighting.Ambient = Color3.new(1,1,1)
+		Lighting.OutdoorAmbient = Color3.new(1,1,1)
+		Lighting.GlobalShadows = false
+	elseif wasFB then
+		wasFB = false
+		Lighting.Brightness = origL.Brightness
+		Lighting.ClockTime = origL.ClockTime
+		Lighting.Ambient = origL.Ambient
+		Lighting.OutdoorAmbient = origL.OutdoorAmbient
+		Lighting.GlobalShadows = origL.GlobalShadows
 	end
+
+	if S.NoFog then
+		wasNF = true
+		Lighting.FogStart = 1e6
+		Lighting.FogEnd = 1e6
+		if atmo then atmo.Density = 0 end
+	elseif wasNF then
+		wasNF = false
+		Lighting.FogStart = origL.FogStart
+		Lighting.FogEnd = origL.FogEnd
+		if atmo then atmo.Density = origDensity end
+	end
+end)
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	if hum then
 		if S.Speed then hum.WalkSpeed = S.SpeedVal
