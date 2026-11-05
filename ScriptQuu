@@ -696,3 +696,195 @@ draggable(zoomBtn, zoomBtn, function()
 		cam2.FieldOfView = savedFov
 	end
 end)
+---------------------------------------------------------------- CONFIG TAMBAHAN
+local T = {
+	Fullbright = false,
+	NoFog = false,
+	Aim = false,
+	AimPart = "Head",
+}
+local savedLighting = {}
+local savedFog = {}
+
+---------------------------------------------------------------- TELEPORT (klik tempat)
+local TP = { ClickMode = false }
+
+local tpConn
+local function enableClickTeleport()
+	tpConn = UIS.InputBegan:Connect(function(i, gp)
+		if gp or not TP.ClickMode then return end
+		if i.UserInputType == Enum.UserInputType.MouseButton1 then
+			local mouse = lp:GetMouse()
+			local target, pos = mouse.Target, mouse.Hit
+			if pos then
+				local char = lp.Character
+				local root = char and char:FindFirstChild("HumanoidRootPart")
+				if root then
+					root.CFrame = CFrame.new(pos.Position + Vector3.new(0, 3, 0))
+				end
+			end
+		end
+	end)
+end
+local function disableClickTeleport()
+	if tpConn then tpConn:Disconnect(); tpConn = nil end
+end
+
+---------------------------------------------------------------- TELEPORT (ke player)
+local function teleportToPlayer(targetName)
+	local char = lp.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+	local target
+	for _, p in Players:GetPlayers() do
+		if p ~= lp and (p.Name:lower() == targetName:lower() or p.DisplayName:lower() == targetName:lower()) then
+			target = p
+			break
+		end
+	end
+	if not target then return end
+	local tc = target.Character
+	local troot = tc and tc:FindFirstChild("HumanoidRootPart")
+	if troot then
+		root.CFrame = troot.CFrame + Vector3.new(0, 0, 3)
+	end
+end
+
+---------------------------------------------------------------- FULLBRIGHT + NO FOG
+local Lighting = game:GetService("Lighting")
+
+local function applyFullbright(on)
+	if on then
+		savedLighting = {
+			Brightness = Lighting.Brightness, ClockTime = Lighting.ClockTime,
+			Ambient = Lighting.Ambient, OutdoorAmbient = Lighting.OutdoorAmbient,
+			GlobalShadows = Lighting.GlobalShadows,
+		}
+		Lighting.Brightness = 2
+		Lighting.ClockTime = 14
+		Lighting.Ambient = Color3.new(1, 1, 1)
+		Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
+		Lighting.GlobalShadows = false
+	else
+		if savedLighting.Brightness then
+			Lighting.Brightness = savedLighting.Brightness
+			Lighting.ClockTime = savedLighting.ClockTime
+			Lighting.Ambient = savedLighting.Ambient
+			Lighting.OutdoorAmbient = savedLighting.OutdoorAmbient
+			Lighting.GlobalShadows = savedLighting.GlobalShadows
+		end
+	end
+end
+
+local function applyNoFog(on)
+	if on then
+		savedFog = { FogEnd = Lighting.FogEnd, FogStart = Lighting.FogStart }
+		Lighting.FogEnd = 1e9
+		Lighting.FogStart = 0
+	else
+		if savedFog.FogEnd then
+			Lighting.FogEnd = savedFog.FogEnd
+			Lighting.FogStart = savedFog.FogStart
+		end
+	end
+end
+
+---------------------------------------------------------------- AUTO AIM
+local AIM_PARTS = { "Head", "UpperTorso", "Torso", "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg" }
+
+local function closestTarget()
+	local char = lp.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return nil end
+	local cam2 = workspace.CurrentCamera
+	local best, bestDist
+	for _, p in Players:GetPlayers() do
+		if p ~= lp then
+			local oc = p.Character
+			local ohum = oc and oc:FindFirstChildOfClass("Humanoid")
+			local opart = oc and oc:FindFirstChild(T.AimPart)
+			if ohum and ohum.Health > 0 and opart then
+				local v = cam2:WorldToViewportPoint(opart.Position)
+				if v.Z > 0 then
+					local screen = Vector2.new(v.X, v.Y)
+					local center = Vector2.new(cam2.ViewportSize.X / 2, cam2.ViewportSize.Y / 2)
+					local d = (screen - center).Magnitude
+					if not bestDist or d < bestDist then
+						bestDist, best = d, opart
+					end
+				end
+			end
+		end
+	end
+	return best
+end
+
+RunService.RenderStepped:Connect(function()
+	if not T.Aim then return end
+	local part = closestTarget()
+	if part then
+		local char = lp.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if root then
+			workspace.CurrentCamera.CFrame = CFrame.new(workspace.CurrentCamera.CFrame.Position, part.Position)
+		end
+	end
+end)
+
+---------------------------------------------------------------- UI: TELEPORT ROW
+xitRow(xit, "Teleport Klik", TP.ClickMode, function(v)
+	TP.ClickMode = v
+	if v then enableClickTeleport() else disableClickTeleport() end
+end)
+
+do
+	local row = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, xit)
+	local box = new("TextBox", {
+		Size = UDim2.new(1, -74, 1, 0), BackgroundColor3 = OFF, Text = "", PlaceholderText = "Username",
+		TextColor3 = W, PlaceholderColor3 = Color3.fromRGB(170, 170, 180), Font = Enum.Font.Gotham, TextSize = 14,
+		ClearTextOnFocus = false,
+	}, row)
+	corner(box)
+	new("UIPadding", { PaddingLeft = UDim.new(0, 8) }, box)
+	local go = new("TextButton", {
+		Size = UDim2.fromOffset(66, 32), Position = UDim2.new(1, -66, 0, 0), BackgroundColor3 = ON,
+		Text = "TP", TextColor3 = W, Font = Enum.Font.GothamBold, TextSize = 14, AutoButtonColor = false,
+	}, row)
+	corner(go)
+	go.MouseButton1Click:Connect(function()
+		if box.Text ~= "" then teleportToPlayer(box.Text) end
+	end)
+end
+
+---------------------------------------------------------------- UI: FULLBRIGHT, NO FOG, AUTO AIM
+xitRow(xit, "Fullbright", T.Fullbright, function(v)
+	T.Fullbright = v
+	applyFullbright(v)
+end)
+xitRow(xit, "No Fog", T.NoFog, function(v)
+	T.NoFog = v
+	applyNoFog(v)
+end)
+
+local aimPanel = new("Frame", {
+	Size = UDim2.fromOffset(226, 0), AutomaticSize = Enum.AutomaticSize.Y, AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(0, -8, 0, 0), BackgroundColor3 = PANEL, Visible = false,
+}, menu)
+corner(aimPanel, 10); pad(aimPanel, 8); list(aimPanel, 6)
+new("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1, Text = "Setting Auto Aim", TextColor3 = W,
+	Font = Enum.Font.GothamBold, TextSize = 14, LayoutOrder = nextOrder(),
+}, aimPanel)
+mkCycle(aimPanel, UDim2.new(1, 0, 0, 30), "Target", AIM_PARTS, T.AimPart, function(v) T.AimPart = v end)
+
+local oldShowPage2 = showPage
+showPage = function(name)
+	oldShowPage2(name)
+	aimPanel.Visible = false
+end
+
+xitRow(xit, "Auto Aim", T.Aim, function(v) T.Aim = v end, true, function()
+	panel.Visible = false
+	flyPanel.Visible = false
+	aimPanel.Visible = not aimPanel.Visible
+end)
