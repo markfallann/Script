@@ -505,3 +505,194 @@ UIS.InputBegan:Connect(function(i, gp)
 		toggleMenu()
 	end
 end)
+---------------------------------------------------------------- XIT PAGE (movement)
+local X = {
+	Fling = false,
+	FlingRange = 10,
+	FlingPower = 9000,
+	AntiFall = true,
+	Fly = false,
+	FlySpeed = 60,
+	Noclip = false,
+}
+
+local xit = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false }, pages)
+pad(xit, 8); list(xit, 6)
+
+local goXit = new("TextButton", {
+	Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = OFF, Text = "Xit", TextColor3 = W,
+	Font = Enum.Font.GothamBold, TextSize = 15, AutoButtonColor = false, LayoutOrder = nextOrder(),
+}, home)
+corner(goXit)
+goXit.MouseButton1Click:Connect(function() showPage("Xit") end)
+
+-- panel pengaturan Fly (speed)
+local flyPanel = new("Frame", {
+	Size = UDim2.fromOffset(226, 0), AutomaticSize = Enum.AutomaticSize.Y, AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(0, -8, 0, 0), BackgroundColor3 = PANEL, Visible = false,
+}, menu)
+corner(flyPanel, 10); pad(flyPanel, 8); list(flyPanel, 6)
+new("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1, Text = "Setting Fly", TextColor3 = W,
+	Font = Enum.Font.GothamBold, TextSize = 14, LayoutOrder = nextOrder(),
+}, flyPanel)
+mkCycle(flyPanel, UDim2.new(1, 0, 0, 30), "Speed", { 30, 60, 100, 150, 250 }, X.FlySpeed, function(v) X.FlySpeed = v end)
+
+local oldShowPage = showPage
+showPage = function(name)
+	oldShowPage(name)
+	xit.Visible = name == "Xit"
+	flyPanel.Visible = false
+end
+
+local function xitRow(parent, label, init, cb, withGear, gearCb)
+	local row = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, parent)
+	mkToggle(row, withGear and UDim2.new(1, -38, 1, 0) or UDim2.new(1, 0, 1, 0), label, init, cb)
+	if withGear then
+		local g = new("TextButton", {
+			Size = UDim2.fromOffset(34, 32), Position = UDim2.new(1, -34, 0, 0), BackgroundColor3 = OFF,
+			Text = "⚙️", TextSize = 16, AutoButtonColor = false,
+		}, row)
+		corner(g)
+		g.MouseButton1Click:Connect(gearCb)
+	end
+end
+
+xitRow(xit, "WalkFling", X.Fling, function(v) X.Fling = v end)
+xitRow(xit, "Anti Fall Damage", X.AntiFall, function(v) X.AntiFall = v end)
+xitRow(xit, "Fly", X.Fly, function(v) X.Fly = v end, true, function()
+	panel.Visible = false
+	flyPanel.Visible = not flyPanel.Visible
+end)
+xitRow(xit, "Noclip", X.Noclip, function(v) X.Noclip = v end)
+
+---------------------------------------------------------------- WALKFLING
+RunService.Stepped:Connect(function()
+	if not X.Fling then return end
+	local char = lp.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not root or not hum then return end
+
+	for _, p in Players:GetPlayers() do
+		if p ~= lp then
+			local oc = p.Character
+			local oroot = oc and oc:FindFirstChild("HumanoidRootPart")
+			local ohum = oc and oc:FindFirstChildOfClass("Humanoid")
+			if oroot and ohum and ohum.Health > 0 then
+				local dist = (oroot.Position - root.Position).Magnitude
+				if dist <= X.FlingRange then
+					local dir = (oroot.Position - root.Position)
+					if dir.Magnitude < 0.1 then dir = Vector3.new(1, 0, 0) end
+					dir = dir.Unit
+					oroot.AssemblyLinearVelocity = dir * X.FlingPower + Vector3.new(0, X.FlingPower * 0.6, 0)
+				end
+			end
+		end
+	end
+end)
+
+---------------------------------------------------------------- ANTI FALL DAMAGE
+local function hookFallDamage()
+	local char = lp.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum:SetStateEnabled(Enum.HumanoidStateType.Landed, not X.AntiFall)
+	end
+end
+RunService.Heartbeat:Connect(hookFallDamage)
+lp.CharacterAdded:Connect(function()
+	task.wait(0.5)
+	hookFallDamage()
+end)
+
+---------------------------------------------------------------- FLY
+local flyConn
+local function startFly()
+	local char = lp.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not root or not hum then return end
+	hum.PlatformStand = true
+	local bv = Instance.new("BodyVelocity")
+	bv.Name = "SQ_Fly"
+	bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+	bv.Velocity = Vector3.new()
+	bv.Parent = root
+	flyConn = RunService.RenderStepped:Connect(function()
+		if not X.Fly then return end
+		local c2 = workspace.CurrentCamera
+		local move = Vector3.new()
+		if UIS:IsKeyDown(Enum.KeyCode.W) then move += c2.CFrame.LookVector end
+		if UIS:IsKeyDown(Enum.KeyCode.S) then move -= c2.CFrame.LookVector end
+		if UIS:IsKeyDown(Enum.KeyCode.A) then move -= c2.CFrame.RightVector end
+		if UIS:IsKeyDown(Enum.KeyCode.D) then move += c2.CFrame.RightVector end
+		if UIS:IsKeyDown(Enum.KeyCode.Space) then move += Vector3.new(0, 1, 0) end
+		if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then move -= Vector3.new(0, 1, 0) end
+		if move.Magnitude > 0 then move = move.Unit end
+		bv.Velocity = move * X.FlySpeed
+	end)
+end
+local function stopFly()
+	if flyConn then flyConn:Disconnect(); flyConn = nil end
+	local char = lp.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if root then
+		local bv = root:FindFirstChild("SQ_Fly")
+		if bv then bv:Destroy() end
+	end
+	if hum then hum.PlatformStand = false end
+end
+local lastFly = X.Fly
+RunService.RenderStepped:Connect(function()
+	if X.Fly ~= lastFly then
+		lastFly = X.Fly
+		if X.Fly then startFly() else stopFly() end
+	end
+end)
+lp.CharacterAdded:Connect(function()
+	if X.Fly then
+		task.wait(0.5)
+		startFly()
+	end
+end)
+
+---------------------------------------------------------------- NOCLIP
+RunService.Stepped:Connect(function()
+	local char = lp.Character
+	if not char then return end
+	for _, part in char:GetDescendants() do
+		if part:IsA("BasePart") then
+			part.CanCollide = not X.Noclip
+		end
+	end
+end)
+
+---------------------------------------------------------------- ZOOM (UI terpisah, draggable, sangat kecil)
+local zoomGui = Instance.new("ScreenGui")
+zoomGui.Name = "SQ_Zoom"
+zoomGui.ResetOnSpawn = false
+zoomGui.Parent = lp.PlayerGui
+
+local zoomBtn = new("TextButton", {
+	Size = UDim2.fromOffset(28, 28), Position = UDim2.new(1, -110, 0, 12),
+	BackgroundColor3 = Color3.new(0, 0, 0), BorderSizePixel = 0,
+	Text = "Z", TextColor3 = W, Font = Enum.Font.GothamBold, TextSize = 13,
+	AutoButtonColor = false, ZIndex = 10,
+}, zoomGui)
+corner(zoomBtn, 7)
+new("UIStroke", { Color = Color3.fromRGB(70, 70, 80), Thickness = 1.2 }, zoomBtn)
+
+local zoomed = false
+local savedFov = workspace.CurrentCamera.FieldOfView
+draggable(zoomBtn, zoomBtn, function()
+	local cam2 = workspace.CurrentCamera
+	zoomed = not zoomed
+	if zoomed then
+		savedFov = cam2.FieldOfView
+		cam2.FieldOfView = 30
+	else
+		cam2.FieldOfView = savedFov
+	end
+end)
