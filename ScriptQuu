@@ -1199,3 +1199,127 @@ local copyBtn = new("TextButton", {
 }, copyRow)
 corner(copyBtn)
 copyBtn.MouseButton1Click:Connect(copyMouseLocation)
+---------------------------------------------------------------- SPECTATE PLAYER
+local Spec = { On = false, Target = nil }
+local specConn
+
+local function startSpectate(target)
+	Spec.Target = target
+	local cam2 = workspace.CurrentCamera
+	cam2.CameraType = Enum.CameraType.Scriptable
+	if specConn then specConn:Disconnect() end
+	specConn = RunService.RenderStepped:Connect(function()
+		if not Spec.On or not Spec.Target or not Spec.Target.Parent then
+			return
+		end
+		local oc = Spec.Target.Character
+		local oroot = oc and oc:FindFirstChild("HumanoidRootPart")
+		if oroot then
+			local offset = oroot.CFrame * CFrame.new(0, 2.5, 8)
+			cam2.CFrame = CFrame.new(offset.Position, oroot.Position + Vector3.new(0, 1.5, 0))
+		end
+	end)
+end
+
+local function stopSpectate()
+	Spec.On, Spec.Target = false, nil
+	if specConn then specConn:Disconnect(); specConn = nil end
+	workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+end
+
+---------------------------------------------------------------- CAMERA ZOOM OUT (termasuk game First Person)
+local Zoom = { On = false, Distance = 20 }
+
+local function applyCamZoom()
+	if Zoom.On then
+		pcall(function()
+			lp.CameraMinZoomDistance = Zoom.Distance
+			lp.CameraMaxZoomDistance = Zoom.Distance
+		end)
+		workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+	else
+		pcall(function()
+			lp.CameraMinZoomDistance = 0.5
+			lp.CameraMaxZoomDistance = 400
+		end)
+	end
+end
+
+lp.CharacterAdded:Connect(function()
+	task.wait(0.3)
+	if Zoom.On then applyCamZoom() end
+end)
+
+---------------------------------------------------------------- UI: MENU KEEMPAT "Cam"
+local camPage = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false }, pages)
+pad(camPage, 8); list(camPage, 6)
+
+local goCam = new("TextButton", {
+	Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = OFF, Text = "Cam", TextColor3 = W,
+	Font = Enum.Font.GothamBold, TextSize = 15, AutoButtonColor = false, LayoutOrder = nextOrder(),
+}, home)
+corner(goCam)
+goCam.MouseButton1Click:Connect(function() showPage("Cam") end)
+
+local oldShowPage5 = showPage
+showPage = function(name)
+	oldShowPage5(name)
+	camPage.Visible = name == "Cam"
+	if name ~= "Cam" and Spec.On then
+		stopSpectate()
+	end
+end
+
+-- Spectate
+new("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Text = "Spectate Player", TextColor3 = W,
+	Font = Enum.Font.GothamBold, TextSize = 14, LayoutOrder = nextOrder(),
+}, camPage)
+
+local specRow = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, camPage)
+local specBox = new("TextBox", {
+	Size = UDim2.new(1, -74, 1, 0), BackgroundColor3 = OFF, Text = "", PlaceholderText = "Username",
+	TextColor3 = W, PlaceholderColor3 = Color3.fromRGB(170, 170, 180), Font = Enum.Font.Gotham, TextSize = 14,
+	ClearTextOnFocus = false,
+}, specRow)
+corner(specBox)
+new("UIPadding", { PaddingLeft = UDim.new(0, 8) }, specBox)
+local specGo = new("TextButton", {
+	Size = UDim2.fromOffset(66, 32), Position = UDim2.new(1, -66, 0, 0), BackgroundColor3 = ON,
+	Text = "Spec", TextColor3 = W, Font = Enum.Font.GothamBold, TextSize = 14, AutoButtonColor = false,
+}, specRow)
+corner(specGo)
+specGo.MouseButton1Click:Connect(function()
+	if specBox.Text == "" then return end
+	for _, p in Players:GetPlayers() do
+		if p ~= lp and (p.Name:lower() == specBox.Text:lower() or p.DisplayName:lower() == specBox.Text:lower()) then
+			Spec.On = true
+			startSpectate(p)
+			break
+		end
+	end
+end)
+
+local stopSpecBtn = new("TextButton", {
+	Size = UDim2.new(1, 0, 0, 32), BackgroundColor3 = OFF, Text = "Stop Spectate", TextColor3 = W,
+	Font = Enum.Font.GothamMedium, TextSize = 14, AutoButtonColor = false, LayoutOrder = nextOrder(),
+}, camPage)
+corner(stopSpecBtn)
+stopSpecBtn.MouseButton1Click:Connect(stopSpectate)
+
+-- Zoom out
+new("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Text = "Camera Zoom Out", TextColor3 = W,
+	Font = Enum.Font.GothamBold, TextSize = 14, LayoutOrder = nextOrder(),
+}, camPage)
+
+local zoomRow = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, camPage)
+mkToggle(zoomRow, UDim2.new(1, 0, 1, 0), "Force Zoom Out", Zoom.On, function(v)
+	Zoom.On = v
+	applyCamZoom()
+end)
+
+mkCycle(camPage, UDim2.new(1, 0, 0, 30), "Jarak", { 10, 20, 35, 50, 80 }, Zoom.Distance, function(v)
+	Zoom.Distance = v
+	if Zoom.On then applyCamZoom() end
+end)
