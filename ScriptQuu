@@ -1,0 +1,295 @@
+-- ScriptQuu | PART 1: VISUAL (LocalScript -> StarterPlayerScripts)
+-- Toggle menu: RightShift
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local lp = Players.LocalPlayer
+local cam = workspace.CurrentCamera
+
+---------------------------------------------------------------- SETTINGS
+local S = {
+	ESP = false,
+	Name = false,
+	TeamColor = true,
+	WallCheck = true,
+	Color = Color3.fromRGB(255, 60, 60),
+	Parts = { Full = true, Head = false, Torso = false, Arms = false, Legs = false },
+}
+
+local GROUPS = {
+	Head = { "Head" },
+	Torso = { "Torso", "UpperTorso", "LowerTorso" },
+	Arms = { "Left Arm", "Right Arm", "LeftUpperArm", "LeftLowerArm", "LeftHand", "RightUpperArm", "RightLowerArm", "RightHand" },
+	Legs = { "Left Leg", "Right Leg", "LeftUpperLeg", "LeftLowerLeg", "LeftFoot", "RightUpperLeg", "RightLowerLeg", "RightFoot" },
+}
+
+local function wanted(partName)
+	if S.Parts.Full then
+		return partName ~= "HumanoidRootPart"
+	end
+	for group, on in S.Parts do
+		if on and group ~= "Full" and table.find(GROUPS[group], partName) then
+			return true
+		end
+	end
+	return false
+end
+
+---------------------------------------------------------------- ESP CORE
+local cache = {}
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+local function isVisible(char, target)
+	rayParams.FilterDescendantsInstances = { lp.Character, char }
+	local origin = cam.CFrame.Position
+	return workspace:Raycast(origin, target.Position - origin, rayParams) == nil
+end
+
+local function clearPlayer(p)
+	local c = cache[p]
+	if not c then return end
+	for _, b in c.boxes do b:Destroy() end
+	if c.tag then c.tag:Destroy() end
+	cache[p] = nil
+end
+
+local function makeTag(head)
+	local tag = Instance.new("BillboardGui")
+	tag.Name = "QuuTag"
+	tag.Size = UDim2.fromOffset(140, 20)
+	tag.StudsOffset = Vector3.new(0, 2.6, 0)
+	tag.AlwaysOnTop = true
+	tag.Adornee = head
+	local lbl = Instance.new("TextLabel")
+	lbl.Name = "L"
+	lbl.Size = UDim2.fromScale(1, 1)
+	lbl.BackgroundTransparency = 1
+	lbl.Font = Enum.Font.GothamBold
+	lbl.TextSize = 14
+	lbl.TextStrokeTransparency = 0.4
+	lbl.Parent = tag
+	tag.Parent = head
+	return tag
+end
+
+local function updatePlayer(p)
+	local char = p.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local head = char and char:FindFirstChild("Head")
+
+	if not (S.ESP or S.Name) or not hum or hum.Health <= 0 or not root or not head then
+		clearPlayer(p)
+		return
+	end
+
+	local c = cache[p]
+	if c and c.char ~= char then
+		clearPlayer(p)
+		c = nil
+	end
+	if not c then
+		c = { char = char, boxes = {}, tag = nil }
+		cache[p] = c
+	end
+
+	local color = (S.TeamColor and p.Team) and p.Team.TeamColor.Color or S.Color
+	local visible = true
+	if S.WallCheck then
+		visible = isVisible(char, root) or isVisible(char, head)
+	end
+
+	-- boxes
+	for part, box in c.boxes do
+		if not part.Parent or not S.ESP or not wanted(part.Name) then
+			box:Destroy()
+			c.boxes[part] = nil
+		end
+	end
+	if S.ESP then
+		for _, part in char:GetChildren() do
+			if part:IsA("BasePart") and wanted(part.Name) and not c.boxes[part] then
+				local box = Instance.new("BoxHandleAdornment")
+				box.Name = "QuuBox"
+				box.Adornee = part
+				box.Size = part.Size
+				box.Transparency = 0.45
+				box.ZIndex = 1
+				box.AlwaysOnTop = true
+				box.Parent = part
+				c.boxes[part] = box
+			end
+		end
+		for _, box in c.boxes do
+			box.Color3 = color
+			box.Visible = visible
+		end
+	end
+
+	-- name
+	if S.Name then
+		if not c.tag or not c.tag.Parent then
+			c.tag = makeTag(head)
+		end
+		c.tag.Enabled = visible
+		c.tag.L.Text = p.DisplayName
+		c.tag.L.TextColor3 = color
+	elseif c.tag then
+		c.tag:Destroy()
+		c.tag = nil
+	end
+end
+
+RunService.RenderStepped:Connect(function()
+	for _, p in Players:GetPlayers() do
+		if p ~= lp then
+			updatePlayer(p)
+		end
+	end
+end)
+Players.PlayerRemoving:Connect(clearPlayer)
+
+---------------------------------------------------------------- UI HELPERS
+local ON_COL, OFF_COL = Color3.fromRGB(46, 160, 90), Color3.fromRGB(60, 60, 75)
+
+local function new(class, props, parent)
+	local o = Instance.new(class)
+	for k, v in props do o[k] = v end
+	o.Parent = parent
+	return o
+end
+
+local function mkToggle(parent, pos, size, label, init, cb)
+	local on = init
+	local b = new("TextButton", {
+		Position = pos, Size = size, Text = "", AutoButtonColor = false,
+		TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamMedium, TextSize = 14,
+	}, parent)
+	new("UICorner", { CornerRadius = UDim.new(0, 6) }, b)
+	local function render()
+		b.BackgroundColor3 = on and ON_COL or OFF_COL
+		b.Text = label .. " : " .. (on and "On" or "Off")
+	end
+	render()
+	b.MouseButton1Click:Connect(function()
+		on = not on
+		render()
+		cb(on)
+	end)
+	return b, function(v) on = v; render() end
+end
+
+---------------------------------------------------------------- UI MAIN
+local gui = new("ScreenGui", { Name = "ScriptQuu", ResetOnSpawn = false }, lp:WaitForChild("PlayerGui"))
+
+local main = new("Frame", {
+	Size = UDim2.fromOffset(250, 200), Position = UDim2.fromOffset(20, 80),
+	BackgroundColor3 = Color3.fromRGB(24, 24, 32), Active = true,
+}, gui)
+new("UICorner", { CornerRadius = UDim.new(0, 10) }, main)
+
+local title = new("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 30), BackgroundColor3 = Color3.fromRGB(38, 38, 52),
+	Text = "ScriptQuu  •  Visual", TextColor3 = Color3.new(1, 1, 1),
+	Font = Enum.Font.GothamBold, TextSize = 15,
+}, main)
+new("UICorner", { CornerRadius = UDim.new(0, 10) }, title)
+
+-- drag
+do
+	local dragging, startPos, startInput
+	title.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging, startPos, startInput = true, main.Position, i.Position
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			local d = i.Position - startInput
+			main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+	UserInputService.InputBegan:Connect(function(i, gp)
+		if not gp and i.KeyCode == Enum.KeyCode.RightShift then
+			main.Visible = not main.Visible
+		end
+	end)
+end
+
+mkToggle(main, UDim2.fromOffset(10, 40), UDim2.fromOffset(190, 32), "Esp", S.ESP, function(v) S.ESP = v end)
+local gear = new("TextButton", {
+	Position = UDim2.fromOffset(206, 40), Size = UDim2.fromOffset(34, 32),
+	BackgroundColor3 = Color3.fromRGB(60, 60, 75), Text = "⚙️", TextSize = 16, AutoButtonColor = false,
+}, main)
+new("UICorner", { CornerRadius = UDim.new(0, 6) }, gear)
+
+mkToggle(main, UDim2.fromOffset(10, 80), UDim2.fromOffset(230, 32), "Esp Nama", S.Name, function(v) S.Name = v end)
+mkToggle(main, UDim2.fromOffset(10, 120), UDim2.fromOffset(230, 32), "Warna Team", S.TeamColor, function(v) S.TeamColor = v end)
+mkToggle(main, UDim2.fromOffset(10, 160), UDim2.fromOffset(230, 32), "Cek Tembok", S.WallCheck, function(v) S.WallCheck = v end)
+
+---------------------------------------------------------------- UI ESP SETTINGS
+local panel = new("Frame", {
+	Size = UDim2.fromOffset(220, 290), Position = UDim2.new(1, 8, 0, 0),
+	BackgroundColor3 = Color3.fromRGB(24, 24, 32), Visible = false,
+}, main)
+new("UICorner", { CornerRadius = UDim.new(0, 10) }, panel)
+
+new("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1, Text = "Bagian ESP",
+	TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 14,
+}, panel)
+
+local order = { { "Full", "Full Body" }, { "Head", "Head" }, { "Torso", "Torso" }, { "Arms", "Arms" }, { "Legs", "Legs" } }
+local setters = {}
+for idx, info in order do
+	local key, label = info[1], info[2]
+	local _, set = mkToggle(panel, UDim2.fromOffset(10, 28 + (idx - 1) * 32), UDim2.fromOffset(200, 28), label, S.Parts[key], function(v)
+		S.Parts[key] = v
+		if v and key == "Full" then
+			for k in S.Parts do
+				if k ~= "Full" then
+					S.Parts[k] = false
+					setters[k](false)
+				end
+			end
+		elseif v then
+			S.Parts.Full = false
+			setters.Full(false)
+		end
+	end)
+	setters[key] = set
+end
+
+new("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 24), Position = UDim2.fromOffset(0, 194), BackgroundTransparency = 1,
+	Text = "Warna ESP", TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 14,
+}, panel)
+
+local palette = {
+	Color3.fromRGB(255, 60, 60), Color3.fromRGB(255, 150, 40), Color3.fromRGB(255, 230, 60), Color3.fromRGB(70, 220, 90),
+	Color3.fromRGB(60, 220, 220), Color3.fromRGB(70, 120, 255), Color3.fromRGB(180, 80, 255), Color3.fromRGB(255, 255, 255),
+}
+for i, col in palette do
+	local row, colIdx = math.floor((i - 1) / 4), (i - 1) % 4
+	local sw = new("TextButton", {
+		Position = UDim2.fromOffset(12 + colIdx * 50, 222 + row * 30), Size = UDim2.fromOffset(42, 24),
+		BackgroundColor3 = col, Text = "", AutoButtonColor = false,
+	}, panel)
+	new("UICorner", { CornerRadius = UDim.new(0, 6) }, sw)
+	sw.MouseButton1Click:Connect(function()
+		S.Color = col
+		S.TeamColor = false
+	end)
+end
+
+gear.MouseButton1Click:Connect(function()
+	panel.Visible = not panel.Visible
+end)
