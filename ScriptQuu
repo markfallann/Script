@@ -1,159 +1,220 @@
--- ScriptQuu | PART 1: VISUAL (LocalScript -> StarterPlayerScripts)
--- Toggle menu: RightShift
+-- ScriptQuu | Visual (Full Fix) | LocalScript -> StarterPlayerScripts
+-- Buka menu: klik logo SQ (bisa di-drag) / RightShift
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+local UIS = game:GetService("UserInputService")
 
 local lp = Players.LocalPlayer
-local cam = workspace.CurrentCamera
+local STUD_TO_M = 0.28
 
----------------------------------------------------------------- SETTINGS
-local S = {
-	ESP = false,
-	Name = false,
-	TeamColor = true,
-	WallCheck = true,
-	Color = Color3.fromRGB(255, 60, 60),
-	Parts = { Full = true, Head = false, Torso = false, Arms = false, Legs = false },
-}
-
-local GROUPS = {
-	Head = { "Head" },
-	Torso = { "Torso", "UpperTorso", "LowerTorso" },
-	Arms = { "Left Arm", "Right Arm", "LeftUpperArm", "LeftLowerArm", "LeftHand", "RightUpperArm", "RightLowerArm", "RightHand" },
-	Legs = { "Left Leg", "Right Leg", "LeftUpperLeg", "LeftLowerLeg", "LeftFoot", "RightUpperLeg", "RightLowerLeg", "RightFoot" },
-}
-
-local function wanted(partName)
-	if S.Parts.Full then
-		return partName ~= "HumanoidRootPart"
-	end
-	for group, on in S.Parts do
-		if on and group ~= "Full" and table.find(GROUPS[group], partName) then
-			return true
-		end
-	end
-	return false
+---------------------------------------------------------------- CONFIG
+local function feat(extra)
+	local t = { On = false, Color = Color3.fromRGB(255, 60, 60), TeamColor = true, WallCheck = true }
+	for k, v in extra do t[k] = v end
+	return t
 end
+
+local F = {
+	Esp = feat({ Fill = true }),
+	Name = feat({ Color = Color3.fromRGB(255, 255, 255), Display = true }),
+	Dist = feat({ Color = Color3.fromRGB(255, 255, 255), Unit = "Meter" }),
+	Tracer = feat({ Origin = "Bawah", Thick = 2 }),
+}
 
 ---------------------------------------------------------------- ESP CORE
 local cache = {}
 local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
-local function isVisible(char, target)
-	rayParams.FilterDescendantsInstances = { lp.Character, char }
+local function isVisible(char, target, cam)
+	local filter = { char }
+	if lp.Character then table.insert(filter, lp.Character) end
+	rayParams.FilterDescendantsInstances = filter
 	local origin = cam.CFrame.Position
 	return workspace:Raycast(origin, target.Position - origin, rayParams) == nil
 end
 
-local function clearPlayer(p)
+local function colorFor(p, cfg)
+	if cfg.TeamColor and p.Team then
+		return p.Team.TeamColor.Color
+	end
+	return cfg.Color
+end
+
+local function drop(p)
 	local c = cache[p]
 	if not c then return end
-	for _, b in c.boxes do b:Destroy() end
+	if c.sel then c.sel:Destroy() end
 	if c.tag then c.tag:Destroy() end
+	if c.line then c.line:Destroy() end
 	cache[p] = nil
 end
 
-local function makeTag(head)
-	local tag = Instance.new("BillboardGui")
-	tag.Name = "QuuTag"
-	tag.Size = UDim2.fromOffset(140, 20)
-	tag.StudsOffset = Vector3.new(0, 2.6, 0)
-	tag.AlwaysOnTop = true
-	tag.Adornee = head
-	local lbl = Instance.new("TextLabel")
-	lbl.Name = "L"
-	lbl.Size = UDim2.fromScale(1, 1)
-	lbl.BackgroundTransparency = 1
-	lbl.Font = Enum.Font.GothamBold
-	lbl.TextSize = 14
-	lbl.TextStrokeTransparency = 0.4
-	lbl.Parent = tag
-	tag.Parent = head
-	return tag
+local tracerGui = Instance.new("ScreenGui")
+tracerGui.Name = "SQ_Tracer"
+tracerGui.ResetOnSpawn = false
+tracerGui.IgnoreGuiInset = true
+tracerGui.Parent = lp:WaitForChild("PlayerGui")
+
+local function mkLabel(parent, y)
+	local l = Instance.new("TextLabel")
+	l.Size = UDim2.new(1, 0, 0, 18)
+	l.Position = UDim2.fromOffset(0, y)
+	l.BackgroundTransparency = 1
+	l.Font = Enum.Font.GothamBold
+	l.TextSize = 14
+	l.TextStrokeTransparency = 0.3
+	l.Text = ""
+	l.Parent = parent
+	return l
 end
 
-local function updatePlayer(p)
+local function update(p, cam)
 	local char = p.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	local head = char and char:FindFirstChild("Head")
+	local any = F.Esp.On or F.Name.On or F.Dist.On or F.Tracer.On
 
-	if not (S.ESP or S.Name) or not hum or hum.Health <= 0 or not root or not head then
-		clearPlayer(p)
+	if not any or not hum or hum.Health <= 0 or not root or not head then
+		drop(p)
 		return
 	end
 
 	local c = cache[p]
 	if c and c.char ~= char then
-		clearPlayer(p)
+		drop(p)
 		c = nil
 	end
 	if not c then
-		c = { char = char, boxes = {}, tag = nil }
+		c = { char = char }
 		cache[p] = c
 	end
 
-	local color = (S.TeamColor and p.Team) and p.Team.TeamColor.Color or S.Color
-	local visible = true
-	if S.WallCheck then
-		visible = isVisible(char, root) or isVisible(char, head)
+	local vis
+	local function visible(cfg)
+		if not cfg.WallCheck then return true end
+		if vis == nil then
+			vis = isVisible(char, root, cam) or isVisible(char, head, cam)
+		end
+		return vis
 	end
 
-	-- boxes
-	for part, box in c.boxes do
-		if not part.Parent or not S.ESP or not wanted(part.Name) then
-			box:Destroy()
-			c.boxes[part] = nil
+	-- ESP BADAN (satu kotak utuh)
+	local e = F.Esp
+	if e.On then
+		if not c.sel or not c.sel.Parent then
+			local s = Instance.new("SelectionBox")
+			s.Name = "SQ_Esp"
+			s.Adornee = char
+			s.LineThickness = 0.04
+			s.Parent = char
+			c.sel = s
 		end
-	end
-	if S.ESP then
-		for _, part in char:GetChildren() do
-			if part:IsA("BasePart") and wanted(part.Name) and not c.boxes[part] then
-				local box = Instance.new("BoxHandleAdornment")
-				box.Name = "QuuBox"
-				box.Adornee = part
-				box.Size = part.Size
-				box.Transparency = 0.45
-				box.ZIndex = 1
-				box.AlwaysOnTop = true
-				box.Parent = part
-				c.boxes[part] = box
-			end
-		end
-		for _, box in c.boxes do
-			box.Color3 = color
-			box.Visible = visible
-		end
+		local col = colorFor(p, e)
+		c.sel.Color3 = col
+		c.sel.SurfaceColor3 = col
+		c.sel.SurfaceTransparency = e.Fill and 0.8 or 1
+		c.sel.Visible = visible(e)
+	elseif c.sel then
+		c.sel:Destroy()
+		c.sel = nil
 	end
 
-	-- name
-	if S.Name then
+	-- NAMA + JARAK
+	local n, d = F.Name, F.Dist
+	if n.On or d.On then
 		if not c.tag or not c.tag.Parent then
-			c.tag = makeTag(head)
+			local tag = Instance.new("BillboardGui")
+			tag.Name = "SQ_Tag"
+			tag.Size = UDim2.fromOffset(160, 36)
+			tag.StudsOffset = Vector3.new(0, 3, 0)
+			tag.AlwaysOnTop = true
+			tag.Adornee = head
+			c.nameL = mkLabel(tag, 0)
+			c.distL = mkLabel(tag, 18)
+			tag.Parent = head
+			c.tag = tag
 		end
-		c.tag.Enabled = visible
-		c.tag.L.Text = p.DisplayName
-		c.tag.L.TextColor3 = color
+		c.nameL.Visible = n.On and visible(n)
+		if n.On then
+			c.nameL.Text = n.Display and p.DisplayName or p.Name
+			c.nameL.TextColor3 = colorFor(p, n)
+		end
+		c.distL.Position = UDim2.fromOffset(0, n.On and 18 or 9)
+		c.distL.Visible = d.On and visible(d)
+		if d.On then
+			local lroot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+			local from = lroot and lroot.Position or cam.CFrame.Position
+			local studs = (root.Position - from).Magnitude
+			if d.Unit == "Meter" then
+				c.distL.Text = math.floor(studs * STUD_TO_M) .. "m"
+			else
+				c.distL.Text = math.floor(studs) .. " stud"
+			end
+			c.distL.TextColor3 = colorFor(p, d)
+		end
 	elseif c.tag then
 		c.tag:Destroy()
-		c.tag = nil
+		c.tag, c.nameL, c.distL = nil, nil, nil
+	end
+
+	-- TRACER (kabel penunjuk lokasi)
+	local t = F.Tracer
+	if t.On then
+		if not c.line then
+			local line = Instance.new("Frame")
+			line.Name = "SQ_Line"
+			line.AnchorPoint = Vector2.new(0.5, 0.5)
+			line.BorderSizePixel = 0
+			line.Parent = tracerGui
+			c.line = line
+		end
+		if visible(t) then
+			local v = cam:WorldToViewportPoint(root.Position)
+			local size = cam.ViewportSize
+			local pt = Vector2.new(v.X, v.Y)
+			if v.Z < 0 then
+				pt = Vector2.new(size.X - pt.X, size.Y - pt.Y)
+			end
+			local oy = t.Origin == "Bawah" and size.Y or (t.Origin == "Tengah" and size.Y / 2 or 0)
+			local o = Vector2.new(size.X / 2, oy)
+			local diff = pt - o
+			c.line.Size = UDim2.fromOffset(math.min(diff.Magnitude, 4000), t.Thick)
+			c.line.Position = UDim2.fromOffset((o.X + pt.X) / 2, (o.Y + pt.Y) / 2)
+			c.line.Rotation = math.deg(math.atan2(diff.Y, diff.X))
+			c.line.BackgroundColor3 = colorFor(p, t)
+			c.line.Visible = true
+		else
+			c.line.Visible = false
+		end
+	elseif c.line then
+		c.line:Destroy()
+		c.line = nil
 	end
 end
 
 RunService.RenderStepped:Connect(function()
+	local cam = workspace.CurrentCamera
 	for _, p in Players:GetPlayers() do
 		if p ~= lp then
-			updatePlayer(p)
+			update(p, cam)
 		end
 	end
 end)
-Players.PlayerRemoving:Connect(clearPlayer)
+Players.PlayerRemoving:Connect(drop)
 
 ---------------------------------------------------------------- UI HELPERS
-local ON_COL, OFF_COL = Color3.fromRGB(46, 160, 90), Color3.fromRGB(60, 60, 75)
+local ON, OFF = Color3.fromRGB(46, 160, 90), Color3.fromRGB(58, 58, 74)
+local BG, PANEL = Color3.fromRGB(22, 22, 30), Color3.fromRGB(32, 32, 44)
+local W = Color3.new(1, 1, 1)
+
+local order = 0
+local function nextOrder()
+	order += 1
+	return order
+end
 
 local function new(class, props, parent)
 	local o = Instance.new(class)
@@ -162,15 +223,30 @@ local function new(class, props, parent)
 	return o
 end
 
-local function mkToggle(parent, pos, size, label, init, cb)
+local function corner(o, r)
+	new("UICorner", { CornerRadius = UDim.new(0, r or 6) }, o)
+end
+
+local function pad(o, n)
+	new("UIPadding", {
+		PaddingTop = UDim.new(0, n), PaddingBottom = UDim.new(0, n),
+		PaddingLeft = UDim.new(0, n), PaddingRight = UDim.new(0, n),
+	}, o)
+end
+
+local function list(o, gap)
+	new("UIListLayout", { Padding = UDim.new(0, gap), SortOrder = Enum.SortOrder.LayoutOrder }, o)
+end
+
+local function mkToggle(parent, size, label, init, cb, pos)
 	local on = init
 	local b = new("TextButton", {
-		Position = pos, Size = size, Text = "", AutoButtonColor = false,
-		TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamMedium, TextSize = 14,
+		Size = size, Position = pos or UDim2.new(), LayoutOrder = nextOrder(), AutoButtonColor = false,
+		Text = "", TextColor3 = W, Font = Enum.Font.GothamMedium, TextSize = 14, BackgroundColor3 = OFF,
 	}, parent)
-	new("UICorner", { CornerRadius = UDim.new(0, 6) }, b)
+	corner(b)
 	local function render()
-		b.BackgroundColor3 = on and ON_COL or OFF_COL
+		b.BackgroundColor3 = on and ON or OFF
 		b.Text = label .. " : " .. (on and "On" or "Off")
 	end
 	render()
@@ -182,114 +258,198 @@ local function mkToggle(parent, pos, size, label, init, cb)
 	return b, function(v) on = v; render() end
 end
 
----------------------------------------------------------------- UI MAIN
+local function mkCycle(parent, size, label, opts, init, cb)
+	local idx = table.find(opts, init) or 1
+	local b = new("TextButton", {
+		Size = size, LayoutOrder = nextOrder(), AutoButtonColor = false, BackgroundColor3 = OFF,
+		TextColor3 = W, Font = Enum.Font.GothamMedium, TextSize = 14,
+		Text = label .. " : " .. tostring(opts[idx]),
+	}, parent)
+	corner(b)
+	b.MouseButton1Click:Connect(function()
+		idx = idx % #opts + 1
+		b.Text = label .. " : " .. tostring(opts[idx])
+		cb(opts[idx])
+	end)
+end
+
+local function draggable(handle, target, onClick)
+	local dragging, startMouse, startPos, moved = false, nil, nil, 0
+	handle.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging, moved = true, 0
+			startMouse, startPos = i.Position, target.Position
+			i.Changed:Connect(function()
+				if i.UserInputState == Enum.UserInputState.End then
+					if dragging and onClick and moved < 6 then onClick() end
+					dragging = false
+				end
+			end)
+		end
+	end)
+	UIS.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			local d = i.Position - startMouse
+			moved = math.max(moved, d.Magnitude)
+			target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		end
+	end)
+end
+
+---------------------------------------------------------------- UI ROOT
 local gui = new("ScreenGui", { Name = "ScriptQuu", ResetOnSpawn = false }, lp:WaitForChild("PlayerGui"))
 
-local main = new("Frame", {
-	Size = UDim2.fromOffset(250, 200), Position = UDim2.fromOffset(20, 80),
-	BackgroundColor3 = Color3.fromRGB(24, 24, 32), Active = true,
+local menu = new("Frame", {
+	Size = UDim2.fromOffset(270, 216), Position = UDim2.new(1, -286, 0, 64),
+	BackgroundColor3 = BG, Active = true, Visible = false,
 }, gui)
-new("UICorner", { CornerRadius = UDim.new(0, 10) }, main)
+corner(menu, 10)
 
-local title = new("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 30), BackgroundColor3 = Color3.fromRGB(38, 38, 52),
-	Text = "ScriptQuu  •  Visual", TextColor3 = Color3.new(1, 1, 1),
-	Font = Enum.Font.GothamBold, TextSize = 15,
-}, main)
-new("UICorner", { CornerRadius = UDim.new(0, 10) }, title)
+local titleBar = new("Frame", { Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = Color3.fromRGB(38, 38, 52) }, menu)
+corner(titleBar, 10)
+local titleText = new("TextLabel", {
+	Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "ScriptQuu",
+	TextColor3 = W, Font = Enum.Font.GothamBold, TextSize = 15,
+}, titleBar)
+local back = new("TextButton", {
+	Size = UDim2.fromOffset(34, 34), BackgroundTransparency = 1, Text = "‹", TextColor3 = W,
+	Font = Enum.Font.GothamBold, TextSize = 24, Visible = false,
+}, titleBar)
+draggable(titleBar, menu)
 
--- drag
-do
-	local dragging, startPos, startInput
-	title.InputBegan:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-			dragging, startPos, startInput = true, main.Position, i.Position
-		end
-	end)
-	UserInputService.InputChanged:Connect(function(i)
-		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
-			local d = i.Position - startInput
-			main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
-		end
-	end)
-	UserInputService.InputEnded:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-			dragging = false
-		end
-	end)
-	UserInputService.InputBegan:Connect(function(i, gp)
-		if not gp and i.KeyCode == Enum.KeyCode.RightShift then
-			main.Visible = not main.Visible
-		end
-	end)
-end
+local pages = new("Frame", {
+	Position = UDim2.fromOffset(0, 40), Size = UDim2.new(1, 0, 1, -40), BackgroundTransparency = 1,
+}, menu)
 
-mkToggle(main, UDim2.fromOffset(10, 40), UDim2.fromOffset(190, 32), "Esp", S.ESP, function(v) S.ESP = v end)
-local gear = new("TextButton", {
-	Position = UDim2.fromOffset(206, 40), Size = UDim2.fromOffset(34, 32),
-	BackgroundColor3 = Color3.fromRGB(60, 60, 75), Text = "⚙️", TextSize = 16, AutoButtonColor = false,
-}, main)
-new("UICorner", { CornerRadius = UDim.new(0, 6) }, gear)
+local home = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1 }, pages)
+pad(home, 8); list(home, 6)
+local visual = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false }, pages)
+pad(visual, 8); list(visual, 6)
 
-mkToggle(main, UDim2.fromOffset(10, 80), UDim2.fromOffset(230, 32), "Esp Nama", S.Name, function(v) S.Name = v end)
-mkToggle(main, UDim2.fromOffset(10, 120), UDim2.fromOffset(230, 32), "Warna Team", S.TeamColor, function(v) S.TeamColor = v end)
-mkToggle(main, UDim2.fromOffset(10, 160), UDim2.fromOffset(230, 32), "Cek Tembok", S.WallCheck, function(v) S.WallCheck = v end)
-
----------------------------------------------------------------- UI ESP SETTINGS
-local panel = new("Frame", {
-	Size = UDim2.fromOffset(220, 290), Position = UDim2.new(1, 8, 0, 0),
-	BackgroundColor3 = Color3.fromRGB(24, 24, 32), Visible = false,
-}, main)
-new("UICorner", { CornerRadius = UDim.new(0, 10) }, panel)
-
-new("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1, Text = "Bagian ESP",
-	TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 14,
-}, panel)
-
-local order = { { "Full", "Full Body" }, { "Head", "Head" }, { "Torso", "Torso" }, { "Arms", "Arms" }, { "Legs", "Legs" } }
-local setters = {}
-for idx, info in order do
-	local key, label = info[1], info[2]
-	local _, set = mkToggle(panel, UDim2.fromOffset(10, 28 + (idx - 1) * 32), UDim2.fromOffset(200, 28), label, S.Parts[key], function(v)
-		S.Parts[key] = v
-		if v and key == "Full" then
-			for k in S.Parts do
-				if k ~= "Full" then
-					S.Parts[k] = false
-					setters[k](false)
-				end
-			end
-		elseif v then
-			S.Parts.Full = false
-			setters.Full(false)
-		end
-	end)
-	setters[key] = set
-end
-
-new("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 24), Position = UDim2.fromOffset(0, 194), BackgroundTransparency = 1,
-	Text = "Warna ESP", TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 14,
-}, panel)
-
+---------------------------------------------------------------- SETTINGS PANELS
 local palette = {
 	Color3.fromRGB(255, 60, 60), Color3.fromRGB(255, 150, 40), Color3.fromRGB(255, 230, 60), Color3.fromRGB(70, 220, 90),
 	Color3.fromRGB(60, 220, 220), Color3.fromRGB(70, 120, 255), Color3.fromRGB(180, 80, 255), Color3.fromRGB(255, 255, 255),
 }
-for i, col in palette do
-	local row, colIdx = math.floor((i - 1) / 4), (i - 1) % 4
-	local sw = new("TextButton", {
-		Position = UDim2.fromOffset(12 + colIdx * 50, 222 + row * 30), Size = UDim2.fromOffset(42, 24),
-		BackgroundColor3 = col, Text = "", AutoButtonColor = false,
-	}, panel)
-	new("UICorner", { CornerRadius = UDim.new(0, 6) }, sw)
-	sw.MouseButton1Click:Connect(function()
-		S.Color = col
-		S.TeamColor = false
+
+local DEFS = {
+	Esp = { title = "Setting Esp", items = {
+		{ t = "color" }, { t = "toggle", k = "TeamColor", l = "Warna Team" },
+		{ t = "toggle", k = "WallCheck", l = "Cek Tembok" }, { t = "toggle", k = "Fill", l = "Isi Badan" },
+	} },
+	Name = { title = "Setting Nama", items = {
+		{ t = "color" }, { t = "toggle", k = "TeamColor", l = "Warna Team" },
+		{ t = "toggle", k = "WallCheck", l = "Cek Tembok" }, { t = "toggle", k = "Display", l = "Display Name" },
+	} },
+	Dist = { title = "Setting Jarak", items = {
+		{ t = "color" }, { t = "toggle", k = "TeamColor", l = "Warna Team" },
+		{ t = "toggle", k = "WallCheck", l = "Cek Tembok" }, { t = "cycle", k = "Unit", l = "Satuan", o = { "Meter", "Stud" } },
+	} },
+	Tracer = { title = "Setting Tracer", items = {
+		{ t = "color" }, { t = "toggle", k = "TeamColor", l = "Warna Team" },
+		{ t = "toggle", k = "WallCheck", l = "Cek Tembok" },
+		{ t = "cycle", k = "Origin", l = "Dari", o = { "Bawah", "Tengah", "Atas" } },
+		{ t = "cycle", k = "Thick", l = "Tebal", o = { 1, 2, 3, 4 } },
+	} },
+}
+
+local panels = {}
+
+local function buildPanel(key, def)
+	local cfg = F[key]
+	local setters = {}
+	local p = new("Frame", {
+		Size = UDim2.fromOffset(226, 0), AutomaticSize = Enum.AutomaticSize.Y, AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(0, -8, 0, 0), BackgroundColor3 = PANEL, Visible = false,
+	}, menu)
+	corner(p, 10); pad(p, 8); list(p, 6)
+
+	new("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1, Text = def.title, TextColor3 = W,
+		Font = Enum.Font.GothamBold, TextSize = 14, LayoutOrder = nextOrder(),
+	}, p)
+
+	for _, it in def.items do
+		if it.t == "color" then
+			local grid = new("Frame", { Size = UDim2.new(1, 0, 0, 60), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, p)
+			new("UIGridLayout", { CellSize = UDim2.fromOffset(42, 26), CellPadding = UDim2.fromOffset(8, 8) }, grid)
+			for _, col in palette do
+				local sw = new("TextButton", { BackgroundColor3 = col, Text = "", AutoButtonColor = false }, grid)
+				corner(sw)
+				sw.MouseButton1Click:Connect(function()
+					cfg.Color = col
+					cfg.TeamColor = false
+					if setters.TeamColor then setters.TeamColor(false) end
+				end)
+			end
+		elseif it.t == "toggle" then
+			local _, set = mkToggle(p, UDim2.new(1, 0, 0, 30), it.l, cfg[it.k], function(v) cfg[it.k] = v end)
+			setters[it.k] = set
+		elseif it.t == "cycle" then
+			mkCycle(p, UDim2.new(1, 0, 0, 30), it.l, it.o, cfg[it.k], function(v) cfg[it.k] = v end)
+		end
+	end
+	panels[key] = p
+end
+
+for key, def in DEFS do buildPanel(key, def) end
+
+local function hidePanels()
+	for _, p in panels do p.Visible = false end
+end
+
+---------------------------------------------------------------- PAGES
+local function showPage(name)
+	hidePanels()
+	home.Visible = name == "Home"
+	visual.Visible = name == "Visual"
+	back.Visible = name ~= "Home"
+	titleText.Text = name == "Home" and "ScriptQuu" or ("ScriptQuu  •  " .. name)
+end
+
+local goVisual = new("TextButton", {
+	Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = OFF, Text = "Visual", TextColor3 = W,
+	Font = Enum.Font.GothamBold, TextSize = 15, AutoButtonColor = false, LayoutOrder = nextOrder(),
+}, home)
+corner(goVisual)
+goVisual.MouseButton1Click:Connect(function() showPage("Visual") end)
+back.MouseButton1Click:Connect(function() showPage("Home") end)
+
+local rows = {
+	{ "Esp", "Esp" }, { "Name", "Esp Nama" }, { "Dist", "Esp Jarak" }, { "Tracer", "Tracer" },
+}
+for _, r in rows do
+	local key, label = r[1], r[2]
+	local row = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, visual)
+	mkToggle(row, UDim2.new(1, -38, 1, 0), label, F[key].On, function(v) F[key].On = v end)
+	local gear = new("TextButton", {
+		Size = UDim2.fromOffset(34, 32), Position = UDim2.new(1, -34, 0, 0), BackgroundColor3 = OFF,
+		Text = "⚙️", TextSize = 16, AutoButtonColor = false,
+	}, row)
+	corner(gear)
+	gear.MouseButton1Click:Connect(function()
+		local show = not panels[key].Visible
+		hidePanels()
+		panels[key].Visible = show
 	end)
 end
 
-gear.MouseButton1Click:Connect(function()
-	panel.Visible = not panel.Visible
+---------------------------------------------------------------- LOGO SQ
+local logo = new("TextButton", {
+	Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, -60, 0, 12), BackgroundColor3 = ON,
+	Text = "SQ", TextColor3 = W, Font = Enum.Font.GothamBlack, TextSize = 17, AutoButtonColor = false, ZIndex = 10,
+}, gui)
+corner(logo, 22)
+
+local function toggleMenu()
+	menu.Visible = not menu.Visible
+	if menu.Visible then showPage("Home") end
+end
+
+draggable(logo, logo, toggleMenu)
+
+UIS.InputBegan:Connect(function(i, gp)
+	if not gp and i.KeyCode == Enum.KeyCode.RightShift then
+		toggleMenu()
+	end
 end)
