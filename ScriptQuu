@@ -1323,3 +1323,572 @@ mkCycle(camPage, UDim2.new(1, 0, 0, 30), "Jarak", { 10, 20, 35, 50, 80 }, Zoom.D
 	Zoom.Distance = v
 	if Zoom.On then applyCamZoom() end
 end)
+---------------------------------------------------------------- CONFIG SAVE/LOAD
+local HttpService = game:GetService("HttpService")
+local CONFIG_FOLDER = "ScriptQuu"
+local CONFIG_PATH = CONFIG_FOLDER .. "/config_" .. tostring(game.PlaceId) .. ".json"
+
+local function ensureFolder()
+	pcall(function()
+		if not isfolder(CONFIG_FOLDER) then makefolder(CONFIG_FOLDER) end
+	end)
+end
+
+local function saveConfig()
+	ensureFolder()
+	local data = {
+		E = E, X = X, T = T, Tools = Tools, Zoom = Zoom,
+	}
+	pcall(function()
+		writefile(CONFIG_PATH, HttpService:JSONEncode(data))
+	end)
+end
+
+local function loadConfig()
+	ensureFolder()
+	local ok, raw = pcall(function() return readfile(CONFIG_PATH) end)
+	if not ok or not raw then return end
+	local ok2, data = pcall(function() return HttpService:JSONDecode(raw) end)
+	if not ok2 or not data then return end
+	for k, v in data.E or {} do E[k] = v end
+	for k, v in data.X or {} do X[k] = v end
+	for k, v in data.T or {} do T[k] = v end
+	for k, v in data.Tools or {} do Tools[k] = v end
+	for k, v in data.Zoom or {} do Zoom[k] = v end
+end
+
+loadConfig() -- auto-load saat join
+
+---------------------------------------------------------------- NOTIFICATION POPUP (pengganti print)
+local notifGui = new("ScreenGui", { Name = "SQ_Notif", ResetOnSpawn = false }, lp.PlayerGui)
+local notifHolder = new("Frame", {
+	Size = UDim2.fromOffset(220, 300), Position = UDim2.new(1, -232, 1, -312),
+	AnchorPoint = Vector2.new(0, 0), BackgroundTransparency = 1,
+}, notifGui)
+new("UIListLayout", { VerticalAlignment = Enum.VerticalAlignment.Bottom, Padding = UDim.new(0, 6) }, notifHolder)
+
+local function notify(text)
+	local n = new("Frame", {
+		Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.15,
+	}, notifHolder)
+	corner(n, 8)
+	new("UIStroke", { Color = Color3.fromRGB(80, 80, 90), Thickness = 1 }, n)
+	new("TextLabel", {
+		Size = UDim2.new(1, -16, 1, 0), Position = UDim2.fromOffset(8, 0), BackgroundTransparency = 1,
+		Text = text, TextColor3 = W, Font = Enum.Font.GothamMedium, TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, n)
+	task.delay(2.5, function()
+		for i = 1, 10 do
+			n.BackgroundTransparency = 0.15 + (i / 10) * 0.85
+			task.wait(0.02)
+		end
+		n:Destroy()
+	end)
+end
+_G.SQ_Notify = notify
+
+---------------------------------------------------------------- WATERMARK + FPS/PING
+local wmGui = new("ScreenGui", { Name = "SQ_Watermark", ResetOnSpawn = false }, lp.PlayerGui)
+local wmFrame = new("Frame", {
+	Size = UDim2.fromOffset(190, 24), Position = UDim2.fromOffset(12, 12),
+	BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.2,
+}, wmGui)
+corner(wmFrame, 6)
+local wmText = new("TextLabel", {
+	Size = UDim2.new(1, -10, 1, 0), Position = UDim2.fromOffset(6, 0), BackgroundTransparency = 1,
+	Text = "ScriptQuu | FPS: 0 | Ping: 0ms", TextColor3 = W, Font = Enum.Font.GothamBold, TextSize = 12,
+	TextXAlignment = Enum.TextXAlignment.Left,
+}, wmFrame)
+
+local frames, lastClock = 0, os.clock()
+RunService.RenderStepped:Connect(function()
+	frames += 1
+end)
+task.spawn(function()
+	while true do
+		task.wait(1)
+		local now = os.clock()
+		local fps = math.floor(frames / (now - lastClock))
+		frames, lastClock = 0, now
+		local ping = math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue())
+		wmText.Text = ("ScriptQuu | FPS: %d | Ping: %dms"):format(fps, ping)
+	end
+end)
+
+---------------------------------------------------------------- KEYBIND CUSTOM PER FITUR
+local Keybinds = {
+	{ name = "Esp", key = Enum.KeyCode.F1, get = function() return E.On end, set = function(v) E.On = v end },
+	{ name = "WalkFling", key = Enum.KeyCode.F2, get = function() return X.Fling end, set = function(v) X.Fling = v end },
+	{ name = "Fly", key = Enum.KeyCode.F3, get = function() return X.Fly end, set = function(v) X.Fly = v end },
+	{ name = "Noclip", key = Enum.KeyCode.F4, get = function() return X.Noclip end, set = function(v) X.Noclip = v end },
+	{ name = "Speed Hack", key = Enum.KeyCode.F5, get = function() return Tools.Speed end, set = function(v)
+		Tools.Speed = v
+		local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+		if hum then hum.WalkSpeed = v and Tools.SpeedVal or 16 end
+	end },
+	{ name = "Freecam", key = Enum.KeyCode.F6, get = function() return Tools.Freecam end, set = function(v) Tools.Freecam = v end },
+}
+
+local capturing = nil -- row sedang menunggu input baru
+
+UIS.InputBegan:Connect(function(i, gp)
+	if gp then return end
+	if capturing then
+		if i.UserInputType == Enum.UserInputType.Keyboard then
+			capturing.key = i.KeyCode
+			capturing.label.Text = capturing.name .. "  [" .. i.KeyCode.Name .. "]"
+			capturing = nil
+		end
+		return
+	end
+	for _, bind in Keybinds do
+		if i.KeyCode == bind.key then
+			bind.set(not bind.get())
+			notify(bind.name .. ": " .. (bind.get() and "On" or "Off"))
+		end
+	end
+end)
+
+---------------------------------------------------------------- ESP ARROW (indikator luar FOV)
+local arrowGui = new("ScreenGui", { Name = "SQ_Arrow", ResetOnSpawn = false }, lp.PlayerGui)
+local arrowCache = {}
+
+RunService.RenderStepped:Connect(function()
+	if not E.On then
+		for _, a in arrowCache do a:Destroy() end
+		table.clear(arrowCache)
+		return
+	end
+	local cam2 = workspace.CurrentCamera
+	local size = cam2.ViewportSize
+	local center = Vector2.new(size.X / 2, size.Y / 2)
+	for _, p in Players:GetPlayers() do
+		if p ~= lp then
+			local oc = p.Character
+			local root = oc and oc:FindFirstChild("HumanoidRootPart")
+			local hum = oc and oc:FindFirstChildOfClass("Humanoid")
+			if root and hum and hum.Health > 0 then
+				local v = cam2:WorldToViewportPoint(root.Position)
+				local onScreen = v.Z > 0 and v.X >= 0 and v.X <= size.X and v.Y >= 0 and v.Y <= size.Y
+				if not onScreen then
+					if not arrowCache[p] then
+						local a = new("TextLabel", {
+							Size = UDim2.fromOffset(22, 22), BackgroundTransparency = 1, Text = "➤",
+							TextColor3 = Color3.fromRGB(255, 80, 80), Font = Enum.Font.GothamBold, TextSize = 20,
+							AnchorPoint = Vector2.new(0.5, 0.5),
+						}, arrowGui)
+						arrowCache[p] = a
+					end
+					local dir = Vector2.new(v.X, v.Y) - center
+					if v.Z < 0 then dir = -dir end
+					dir = dir.Magnitude > 0 and dir.Unit or Vector2.new(1, 0)
+					local margin = 40
+					local radius = math.min(size.X, size.Y) / 2 - margin
+					local pos = center + dir * radius
+					arrowCache[p].Position = UDim2.fromOffset(pos.X, pos.Y)
+					arrowCache[p].Rotation = math.deg(math.atan2(dir.Y, dir.X)) + 90
+				elseif arrowCache[p] then
+					arrowCache[p]:Destroy()
+					arrowCache[p] = nil
+				end
+			end
+		end
+	end
+end)
+
+---------------------------------------------------------------- THEME SWITCHER (ganti warna UI keseluruhan)
+local THEMES = {
+	Default = { bg = Color3.fromRGB(22, 22, 30), bar = Color3.fromRGB(38, 38, 52), panel = Color3.fromRGB(32, 32, 44), accent = Color3.fromRGB(46, 160, 90) },
+	Merah = { bg = Color3.fromRGB(30, 18, 18), bar = Color3.fromRGB(55, 28, 28), panel = Color3.fromRGB(40, 24, 24), accent = Color3.fromRGB(200, 60, 60) },
+	Biru = { bg = Color3.fromRGB(16, 22, 32), bar = Color3.fromRGB(26, 36, 54), panel = Color3.fromRGB(22, 30, 44), accent = Color3.fromRGB(60, 120, 220) },
+	Ungu = { bg = Color3.fromRGB(26, 18, 32), bar = Color3.fromRGB(44, 28, 54), panel = Color3.fromRGB(34, 24, 42), accent = Color3.fromRGB(160, 80, 220) },
+}
+
+local function applyTheme(name)
+	local th = THEMES[name]
+	if not th then return end
+	menu.BackgroundColor3 = th.bg
+	titleBar.BackgroundColor3 = th.bar
+	panel.BackgroundColor3 = th.panel
+	flyPanel.BackgroundColor3 = th.panel
+	aimPanel.BackgroundColor3 = th.panel
+	speedPanel.BackgroundColor3 = th.panel
+	camPage.Parent.Parent.BackgroundColor3 = th.bg -- safe no-op guard
+	ON = th.accent
+end
+
+section("Theme")
+mkCycle(panel, ROW, "Theme", { "Default", "Merah", "Biru", "Ungu" }, "Default", function(v)
+	applyTheme(v)
+end)
+
+---------------------------------------------------------------- PLAYER INFO PANEL (klik nama ESP)
+local infoGui = new("ScreenGui", { Name = "SQ_Info", ResetOnSpawn = false }, lp.PlayerGui)
+local infoFrame = new("Frame", {
+	Size = UDim2.fromOffset(200, 120), Position = UDim2.new(0.5, -100, 0.5, -60),
+	BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.1, Visible = false, ZIndex = 20,
+}, infoGui)
+corner(infoFrame, 10)
+new("UIStroke", { Color = Color3.fromRGB(80, 80, 90), Thickness = 1.5 }, infoFrame)
+pad(infoFrame, 10)
+local infoText = new("TextLabel", {
+	Size = UDim2.new(1, 0, 1, -28), BackgroundTransparency = 1, Text = "", TextColor3 = W,
+	Font = Enum.Font.Gotham, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top, TextWrapped = true,
+}, infoFrame)
+local infoClose = new("TextButton", {
+	Size = UDim2.new(1, 0, 0, 24), Position = UDim2.new(0, 0, 1, -24), BackgroundColor3 = Color3.fromRGB(60, 60, 75),
+	Text = "Tutup", TextColor3 = W, Font = Enum.Font.GothamMedium, TextSize = 13, AutoButtonColor = false,
+}, infoFrame)
+corner(infoClose, 6)
+infoClose.MouseButton1Click:Connect(function() infoFrame.Visible = false end)
+
+local function showPlayerInfo(p)
+	local oc = p.Character
+	local hum = oc and oc:FindFirstChildOfClass("Humanoid")
+	local root = oc and oc:FindFirstChild("HumanoidRootPart")
+	local myroot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+	local dist = (root and myroot) and math.floor((root.Position - myroot.Position).Magnitude * STUD_TO_M) or 0
+	infoText.Text = ("Nama: %s\nTeam: %s\nHealth: %d / %d\nJarak: %dm"):format(
+		p.DisplayName, p.Team and p.Team.Name or "-",
+		hum and math.floor(hum.Health) or 0, hum and math.floor(hum.MaxHealth) or 0, dist
+	)
+	infoFrame.Visible = true
+end
+_G.SQ_ShowPlayerInfo = showPlayerInfo
+
+-- Hook: klik label nama ESP buat munculin info (dipanggil dari BillboardGui nameL di bagian ESP, tambahkan ClickDetector sendiri jika perlu, atau panggil manual: _G.SQ_ShowPlayerInfo(player))
+
+---------------------------------------------------------------- AUTO SAVE CONFIG
+task.spawn(function()
+	while true do
+		task.wait(15)
+		saveConfig()
+	end
+end)
+
+game:BindToClose(saveConfig)
+---------------------------------------------------------------- CONFIG TAMBAHAN GLOBAL
+local Misc = {
+	Crosshair = false,
+	CrossColor = Color3.fromRGB(255, 255, 255),
+	HealthBar = true,
+	AutoHeal = false,
+	HealPercent = 40,
+	FakeLag = false,
+	FakeLagMs = 150,
+	PredictLine = false,
+	NoRecoil = false,
+	NoSway = false,
+	GuiLock = true,
+	SoundEsp = false,
+	SoundRange = 60,
+}
+
+---------------------------------------------------------------- CROSSHAIR CUSTOM
+local crossGui = new("ScreenGui", { Name = "SQ_Cross", ResetOnSpawn = false }, lp.PlayerGui)
+local crossFrame = new("Frame", {
+	Size = UDim2.fromOffset(20, 20), AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.new(0.5, 0, 0.5, 0), BackgroundTransparency = 1, Visible = false,
+}, crossGui)
+local function mkCrossLine(size, pos)
+	return new("Frame", { Size = size, Position = pos, AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Misc.CrossColor, BorderSizePixel = 0 }, crossFrame)
+end
+local lineTop = mkCrossLine(UDim2.fromOffset(2, 8), UDim2.new(0.5, 0, 0, 2))
+local lineBottom = mkCrossLine(UDim2.fromOffset(2, 8), UDim2.new(0.5, 0, 1, -2))
+local lineLeft = mkCrossLine(UDim2.fromOffset(8, 2), UDim2.new(0, 2, 0.5, 0))
+local lineRight = mkCrossLine(UDim2.fromOffset(8, 2), UDim2.new(1, -2, 0.5, 0))
+
+local function setCrossColor(c)
+	Misc.CrossColor = c
+	for _, l in { lineTop, lineBottom, lineLeft, lineRight } do l.BackgroundColor3 = c end
+end
+crossFrame.Visible = Misc.Crosshair
+
+---------------------------------------------------------------- ESP HEALTH BAR
+-- Terintegrasi ke BillboardGui ESP (c.tag) yang sudah ada; tambahkan bar kecil di bawah nama/jarak.
+local healthBars = {}
+RunService.RenderStepped:Connect(function()
+	if not Misc.HealthBar or not E.On then
+		for _, hb in healthBars do hb.frame:Destroy() end
+		table.clear(healthBars)
+		return
+	end
+	for _, p in Players:GetPlayers() do
+		if p ~= lp then
+			local c = cache[p]
+			if c and c.tag then
+				local oc = p.Character
+				local hum = oc and oc:FindFirstChildOfClass("Humanoid")
+				if hum then
+					if not healthBars[p] then
+						local bg = new("Frame", { Size = UDim2.fromOffset(60, 5), Position = UDim2.fromOffset(50, 32), BackgroundColor3 = Color3.fromRGB(40, 40, 40) }, c.tag)
+						corner(bg, 2)
+						local fill = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = Color3.fromRGB(70, 220, 90) }, bg)
+						corner(fill, 2)
+						healthBars[p] = { frame = bg, fill = fill }
+					end
+					local pct = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+					healthBars[p].fill.Size = UDim2.new(pct, 0, 1, 0)
+					healthBars[p].fill.BackgroundColor3 = Color3.fromRGB(255 - math.floor(pct * 185), 60 + math.floor(pct * 160), 60)
+				end
+			elseif healthBars[p] then
+				healthBars[p].frame:Destroy()
+				healthBars[p] = nil
+			end
+		end
+	end
+end)
+
+---------------------------------------------------------------- AUTO HEAL
+RunService.Heartbeat:Connect(function()
+	if not Misc.AutoHeal then return end
+	local char = lp.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+	local pct = hum.Health / math.max(hum.MaxHealth, 1) * 100
+	if pct <= Misc.HealPercent then
+		local backpack = lp:FindFirstChild("Backpack")
+		if backpack then
+			for _, tool in backpack:GetChildren() do
+				if tool.Name:lower():find("heal") or tool.Name:lower():find("potion") or tool.Name:lower():find("food") then
+					char.Humanoid:EquipTool(tool)
+					task.wait(0.1)
+					tool:Activate()
+					notify("Auto Heal: pakai " .. tool.Name)
+					break
+				end
+			end
+		end
+	end
+end)
+
+---------------------------------------------------------------- FAKE LAG / PACKET DELAY SIMULATOR
+-- Menunda replikasi gerak LOKAL sendiri untuk testing lag compensation di game kamu.
+local fakeLagQueue = {}
+RunService.Heartbeat:Connect(function()
+	if not Misc.FakeLag then
+		table.clear(fakeLagQueue)
+		return
+	end
+	local char = lp.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+	table.insert(fakeLagQueue, { t = os.clock(), cf = root.CFrame })
+	local delay = Misc.FakeLagMs / 1000
+	while #fakeLagQueue > 0 and os.clock() - fakeLagQueue[1].t >= delay do
+		table.remove(fakeLagQueue, 1)
+	end
+end)
+
+---------------------------------------------------------------- PREDICTION LINE (arah gerak musuh)
+local predictGui = new("ScreenGui", { Name = "SQ_Predict", ResetOnSpawn = false }, lp.PlayerGui)
+local predictCache = {}
+local lastPos = {}
+
+RunService.RenderStepped:Connect(function(dt)
+	if not Misc.PredictLine then
+		for _, l in predictCache do l:Destroy() end
+		table.clear(predictCache)
+		return
+	end
+	local cam2 = workspace.CurrentCamera
+	for _, p in Players:GetPlayers() do
+		if p ~= lp then
+			local oc = p.Character
+			local root = oc and oc:FindFirstChild("HumanoidRootPart")
+			if root then
+				local prev = lastPos[p]
+				lastPos[p] = root.Position
+				if prev then
+					local vel = (root.Position - prev) / dt
+					local futurePos = root.Position + vel * 0.5
+					local v1 = cam2:WorldToViewportPoint(root.Position)
+					local v2 = cam2:WorldToViewportPoint(futurePos)
+					if v1.Z > 0 and v2.Z > 0 then
+						if not predictCache[p] then
+							predictCache[p] = new("Frame", { BackgroundColor3 = Color3.fromRGB(255, 220, 60), BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0.5) }, predictGui)
+						end
+						local a, b = Vector2.new(v1.X, v1.Y), Vector2.new(v2.X, v2.Y)
+						local diff = b - a
+						predictCache[p].Size = UDim2.fromOffset(diff.Magnitude, 2)
+						predictCache[p].Position = UDim2.fromOffset((a.X + b.X) / 2, (a.Y + b.Y) / 2)
+						predictCache[p].Rotation = math.deg(math.atan2(diff.Y, diff.X))
+					end
+				end
+			end
+		end
+	end
+end)
+
+---------------------------------------------------------------- NO RECOIL / NO SWAY
+-- Hook kamera: batalkan offset recoil/sway yang biasanya ditambahkan lewat CameraOffset atau tween kamera game.
+RunService.RenderStepped:Connect(function()
+	local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+	if Misc.NoRecoil or Misc.NoSway then
+		hum.CameraOffset = Vector3.new(0, 0, 0)
+	end
+end)
+
+---------------------------------------------------------------- GUI LOCK (jangan ke-reset pas respawn)
+lp.CharacterAdded:Connect(function()
+	if Misc.GuiLock then
+		for _, g in lp.PlayerGui:GetChildren() do
+			if g.Name:match("^SQ_") or g.Name == "ScriptQuu" then
+				g.ResetOnSpawn = false
+			end
+		end
+	end
+end)
+
+---------------------------------------------------------------- SOUND ESP (beep makin kenceng makin deket)
+local beepSound = Instance.new("Sound")
+beepSound.SoundId = "rbxassetid://9125662774" -- ganti ID beep sesuai selera
+beepSound.Volume = 0
+beepSound.Looped = true
+beepSound.Parent = lp.PlayerGui
+beepSound:Play()
+
+RunService.Heartbeat:Connect(function()
+	if not Misc.SoundEsp then
+		beepSound.Volume = 0
+		return
+	end
+	local char = lp.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+	local closest
+	for _, p in Players:GetPlayers() do
+		if p ~= lp then
+			local oc = p.Character
+			local oroot = oc and oc:FindFirstChild("HumanoidRootPart")
+			if oroot then
+				local d = (oroot.Position - root.Position).Magnitude
+				if not closest or d < closest then closest = d end
+			end
+		end
+	end
+	if closest and closest <= Misc.SoundRange then
+		beepSound.Volume = (1 - closest / Misc.SoundRange) * 0.6
+		beepSound.PlaybackSpeed = 1 + (1 - closest / Misc.SoundRange)
+	else
+		beepSound.Volume = 0
+	end
+end)
+
+---------------------------------------------------------------- ADMIN COMMAND PANEL (khusus owner game kamu)
+local adminPage = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false }, pages)
+pad(adminPage, 8); list(adminPage, 6)
+
+local goAdmin = new("TextButton", {
+	Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = OFF, Text = "Admin", TextColor3 = W,
+	Font = Enum.Font.GothamBold, TextSize = 15, AutoButtonColor = false, LayoutOrder = nextOrder(),
+}, home)
+corner(goAdmin)
+goAdmin.MouseButton1Click:Connect(function() showPage("Admin") end)
+
+local oldShowPageAdmin = showPage
+showPage = function(name)
+	oldShowPageAdmin(name)
+	adminPage.Visible = name == "Admin"
+end
+
+local adminRow = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, adminPage)
+local adminBox = new("TextBox", {
+	Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = OFF, Text = "", PlaceholderText = "Username target",
+	TextColor3 = W, PlaceholderColor3 = Color3.fromRGB(170, 170, 180), Font = Enum.Font.Gotham, TextSize = 14,
+	ClearTextOnFocus = false,
+}, adminRow)
+corner(adminBox)
+new("UIPadding", { PaddingLeft = UDim.new(0, 8) }, adminBox)
+
+local function findTarget()
+	for _, p in Players:GetPlayers() do
+		if p.Name:lower() == adminBox.Text:lower() or p.DisplayName:lower() == adminBox.Text:lower() then
+			return p
+		end
+	end
+	return nil
+end
+
+local function adminBtn(label, fn)
+	local b = new("TextButton", {
+		Size = UDim2.new(1, 0, 0, 32), BackgroundColor3 = OFF, Text = label, TextColor3 = W,
+		Font = Enum.Font.GothamMedium, TextSize = 14, AutoButtonColor = false, LayoutOrder = nextOrder(),
+	}, adminPage)
+	corner(b)
+	b.MouseButton1Click:Connect(function()
+		local t = findTarget()
+		if not t then notify("Target tidak ditemukan") return end
+		fn(t)
+	end)
+end
+
+adminBtn("Kick (lokal hide)", function(t)
+	-- Catatan: kick asli butuh Script di server (lihat catatan di bawah)
+	notify("Kick butuh ServerScript, lihat catatan")
+end)
+adminBtn("Teleport ke saya", function(t)
+	local myroot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+	local troot = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
+	if myroot and troot then troot.CFrame = myroot.CFrame + Vector3.new(2, 0, 0) end
+end)
+adminBtn("Freeze (anchor)", function(t)
+	local troot = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
+	if troot then troot.Anchored = not troot.Anchored end
+end)
+
+---------------------------------------------------------------- EXPORT / IMPORT CONFIG (via text)
+local exportRow = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, adminPage)
+local exportBtn = new("TextButton", {
+	Size = UDim2.new(0.5, -4, 1, 0), BackgroundColor3 = ON, Text = "Export Config", TextColor3 = W,
+	Font = Enum.Font.GothamBold, TextSize = 13, AutoButtonColor = false,
+}, exportRow)
+corner(exportBtn)
+local importBtn = new("TextButton", {
+	Size = UDim2.new(0.5, -4, 1, 0), Position = UDim2.new(0.5, 4, 0, 0), BackgroundColor3 = OFF,
+	Text = "Import Config", TextColor3 = W, Font = Enum.Font.GothamBold, TextSize = 13, AutoButtonColor = false,
+}, exportRow)
+corner(importBtn)
+
+local importRow = new("Frame", { Size = UDim2.new(1, 0, 0, 60), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, adminPage)
+local importBox = new("TextBox", {
+	Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = OFF, Text = "", PlaceholderText = "Tempel config di sini...",
+	TextColor3 = W, PlaceholderColor3 = Color3.fromRGB(170, 170, 180), Font = Enum.Font.Gotham, TextSize = 12,
+	ClearTextOnFocus = false, MultiLine = true, TextWrapped = true,
+}, importRow)
+corner(importBox)
+pad(importBox, 6)
+
+exportBtn.MouseButton1Click:Connect(function()
+	local data = HttpService:JSONEncode({ E = E, X = X, T = T, Tools = Tools, Zoom = Zoom, Misc = Misc })
+	importBox.Text = data
+	pcall(function() setclipboard(data) end)
+	notify("Config disalin ke clipboard")
+end)
+importBtn.MouseButton1Click:Connect(function()
+	local ok, data = pcall(function() return HttpService:JSONDecode(importBox.Text) end)
+	if not ok or not data then notify("Config tidak valid") return end
+	for k, v in data.E or {} do E[k] = v end
+	for k, v in data.X or {} do X[k] = v end
+	for k, v in data.T or {} do T[k] = v end
+	for k, v in data.Tools or {} do Tools[k] = v end
+	for k, v in data.Zoom or {} do Zoom[k] = v end
+	for k, v in data.Misc or {} do Misc[k] = v end
+	notify("Config berhasil di-import")
+end)
+
+---------------------------------------------------------------- UI TOGGLES MISC (tempel di halaman mana pun, contoh di panel ESP)
+section("Misc")
+tg("Crosshair", Misc, "Crosshair")
+crossFrame.Visible = Misc.Crosshair
+tg("Esp Health Bar", Misc, "HealthBar")
+tg("Auto Heal", Misc, "AutoHeal")
+tg("Fake Lag", Misc, "FakeLag")
+tg("Prediction Line", Misc, "PredictLine")
+tg("No Recoil", Misc, "NoRecoil")
+tg("No Sway", Misc, "NoSway")
+tg("Gui Lock", Misc, "GuiLock")
+tg("Sound Esp", Misc, "SoundEsp")
