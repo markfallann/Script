@@ -1347,3 +1347,83 @@ do
 
 	refreshAll()
 end
+-- XIT: INFINITE JUMP + TP KLIK TEMPAT (tempel paling bawah)
+do
+	-- INFINITE JUMP
+	cfg.infjump = false
+	local IJ = {}
+	pcall(function() if readfile and isfile and isfile(FILE) then IJ = HttpService:JSONDecode(readfile(FILE)) end end)
+	if IJ.infjump ~= nil then cfg.infjump = IJ.infjump end
+
+	UIS.JumpRequest:Connect(function()
+		if cfg.infjump then
+			local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+			if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+		end
+	end)
+
+	local ir = new("Frame", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = ROW, BorderSizePixel = 0}, pages.Xit)
+	round(ir, 6)
+	local ib = new("TextButton", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "Infinite Jump", TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left}, ir)
+	new("UIPadding", {PaddingLeft = UDim.new(0, 10)}, ib)
+	local idot = new("Frame", {Size = UDim2.new(0, 8, 0, 8), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), BackgroundColor3 = Color3.fromRGB(70, 70, 70)}, ib)
+	round(idot, 4)
+	local function iRefresh()
+		idot.BackgroundColor3 = cfg.infjump and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(70, 70, 70)
+		ib.TextColor3 = cfg.infjump and TXT or DIM
+	end
+	table.insert(refreshers, iRefresh)
+	ib.Activated:Connect(function()
+		cfg.infjump = not cfg.infjump
+		iRefresh()
+		save()
+	end)
+
+	-- TP KLIK TEMPAT
+	cfg.clicktp = false
+	local CT = {}
+	pcall(function() if readfile and isfile and isfile(FILE) then CT = HttpService:JSONDecode(readfile(FILE)) end end)
+	if CT.clicktp ~= nil then cfg.clicktp = CT.clicktp end
+
+	local tpMarker = new("Part", {Size = Vector3.new(4, 0.2, 4), Anchored = true, CanCollide = false, Transparency = 1, Name = "SQ_TPMarker"}, nil)
+	local hl = new("Highlight", {FillColor = Color3.fromRGB(255, 255, 255), FillTransparency = 0.6, OutlineColor = Color3.fromRGB(255, 255, 255)}, tpMarker)
+
+	UIS.InputBegan:Connect(function(i, gp)
+		if gp or not cfg.clicktp then return end
+		if i.UserInputType ~= Enum.UserInputType.MouseButton1 and i.UserInputType ~= Enum.UserInputType.Touch then return end
+		local mouseLoc = UIS:GetMouseLocation()
+		local c = Workspace.CurrentCamera
+		local ray = c:ViewportPointToRay(mouseLoc.X, mouseLoc.Y)
+		rp.FilterDescendantsInstances = {lp.Character}
+		local res = Workspace:Raycast(ray.Origin, ray.Direction * 1000, rp)
+		if res then
+			local ch = lp.Character
+			local root = ch and ch:FindFirstChild("HumanoidRootPart")
+			if root then
+				root.CFrame = CFrame.new(res.Position + Vector3.new(0, 3, 0))
+				tpMarker.Position = res.Position + Vector3.new(0, 0.1, 0)
+				tpMarker.Parent = Workspace
+				task.delay(0.4, function() tpMarker.Parent = nil end)
+			end
+		end
+	end)
+
+	local cr = new("Frame", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = ROW, BorderSizePixel = 0}, pages.Xit)
+	round(cr, 6)
+	local cb = new("TextButton", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "Teleport Klik Tempat", TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left}, cr)
+	new("UIPadding", {PaddingLeft = UDim.new(0, 10)}, cb)
+	local cdot = new("Frame", {Size = UDim2.new(0, 8, 0, 8), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), BackgroundColor3 = Color3.fromRGB(70, 70, 70)}, cb)
+	round(cdot, 4)
+	local function cRefresh()
+		cdot.BackgroundColor3 = cfg.clicktp and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(70, 70, 70)
+		cb.TextColor3 = cfg.clicktp and TXT or DIM
+	end
+	table.insert(refreshers, cRefresh)
+	cb.Activated:Connect(function()
+		cfg.clicktp = not cfg.clicktp
+		cRefresh()
+		save()
+	end)
+
+	refreshAll()
+end
