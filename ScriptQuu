@@ -322,3 +322,102 @@ end)
 
 Players.PlayerRemoving:Connect(clear)
 refreshAll()
+-- KORLES (tempel paling bawah)
+pcall(function()
+	if readfile and isfile and isfile(FILE) then
+		local d = HttpService:JSONDecode(readfile(FILE))
+		if d.korles ~= nil then cfg.korles = d.korles end
+		if d.kMode then cfg.kMode = d.kMode end
+	end
+end)
+cfg.korles = cfg.korles or false
+cfg.kMode = cfg.kMode or "all"
+
+local HEADLESS, KORBLOX = 134082579, 139607718
+local origDesc
+
+local function applyKorles()
+	local ch = lp.Character
+	local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+	local ok, desc = pcall(function() return hum:GetAppliedDescription() end)
+	if not ok then return end
+	origDesc = origDesc or {Head = desc.Head, RightLeg = desc.RightLeg}
+	local m = cfg.kMode
+	local hl = cfg.korles and (m == "all" or m == "headless")
+	local kb = cfg.korles and (m == "all" or m == "korblox")
+	desc.Head = hl and HEADLESS or origDesc.Head
+	desc.RightLeg = kb and KORBLOX or origDesc.RightLeg
+	local okA = pcall(function() hum:ApplyDescription(desc) end)
+	if not okA then
+		local head = ch:FindFirstChild("Head")
+		if head then
+			head.Transparency = hl and 1 or 0
+			local f = head:FindFirstChildOfClass("Decal")
+			if f then f.Transparency = hl and 1 or 0 end
+		end
+	end
+end
+
+-- panel setting Korles
+local sp2 = new("Frame", {AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(0, -8, 0, 0), Size = UDim2.new(0, 230, 0, 160), BackgroundColor3 = BG, Visible = false, Active = true}, menu)
+round(sp2, 8) stroke(sp2)
+new("TextLabel", {Position = UDim2.new(0, 10, 0, 6), Size = UDim2.new(1, -20, 0, 24), BackgroundTransparency = 1, Text = "Korles Settings", TextColor3 = TXT, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left}, sp2)
+local k2 = new("Frame", {Position = UDim2.new(0, 6, 0, 34), Size = UDim2.new(1, -12, 1, -40), BackgroundTransparency = 1}, sp2)
+new("UIListLayout", {Padding = UDim.new(0, 6)}, k2)
+
+for _, m in ipairs({{"all", "Semuanya"}, {"korblox", "Korblox"}, {"headless", "Headless"}}) do
+	local b = new("TextButton", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = ROW, Text = m[2], Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, AutoButtonColor = false}, k2)
+	round(b, 6)
+	new("UIPadding", {PaddingLeft = UDim.new(0, 10)}, b)
+	local function refresh()
+		local sel = cfg.kMode == m[1]
+		b.TextColor3 = sel and TXT or DIM
+		b.BackgroundColor3 = sel and Color3.fromRGB(40, 40, 40) or ROW
+	end
+	table.insert(refreshers, refresh)
+	b.Activated:Connect(function()
+		cfg.kMode = m[1]
+		refreshAll()
+		save()
+		applyKorles()
+	end)
+	refresh()
+end
+
+-- baris Korles di menu Visual (di bawah Esp)
+local kr = new("Frame", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = ROW, BorderSizePixel = 0}, pages.Visual)
+round(kr, 6)
+local kb = new("TextButton", {Size = UDim2.new(1, -36, 1, 0), BackgroundTransparency = 1, Text = "Korles", TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left}, kr)
+new("UIPadding", {PaddingLeft = UDim.new(0, 10)}, kb)
+local kdot = new("Frame", {Size = UDim2.new(0, 8, 0, 8), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), BackgroundColor3 = Color3.fromRGB(70, 70, 70)}, kb)
+round(kdot, 4)
+local function krRefresh()
+	kdot.BackgroundColor3 = cfg.korles and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(70, 70, 70)
+	kb.TextColor3 = cfg.korles and TXT or DIM
+end
+table.insert(refreshers, krRefresh)
+kb.Activated:Connect(function()
+	cfg.korles = not cfg.korles
+	krRefresh()
+	save()
+	applyKorles()
+end)
+local kg = new("TextButton", {Position = UDim2.new(1, -34, 0, 2), Size = UDim2.new(0, 30, 0, 30), BackgroundTransparency = 1, Text = "⚙️", TextColor3 = TXT, TextSize = 16, Font = Enum.Font.Gotham}, kr)
+kg.Activated:Connect(function()
+	sp.Visible = false
+	sp2.Visible = not sp2.Visible
+end)
+sp:GetPropertyChangedSignal("Visible"):Connect(function()
+	if sp.Visible then sp2.Visible = false end
+end)
+
+lp.CharacterAdded:Connect(function(c)
+	origDesc = nil
+	c:WaitForChild("Humanoid")
+	task.wait(1.5)
+	if cfg.korles then applyKorles() end
+end)
+
+refreshAll()
+if cfg.korles then applyKorles() end
