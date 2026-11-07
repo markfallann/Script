@@ -1427,3 +1427,58 @@ do
 
 	refreshAll()
 end
+-- NOTIFICATION POPUP + HIDE GUI (tempel paling bawah)
+do
+	-- NOTIFICATION POPUP
+	local notifHolder = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -20), Size = UDim2.new(0, 260, 0, 0),
+		BackgroundTransparency = 1, AutomaticSize = Enum.AutomaticSize.Y,
+	}, gui)
+	local nl = new("UIListLayout", {HorizontalAlignment = Enum.HorizontalAlignment.Center, Padding = UDim.new(0, 6), VerticalAlignment = Enum.VerticalAlignment.Bottom}, notifHolder)
+
+	function notify(text)
+		local n = new("Frame", {Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = BG, BackgroundTransparency = 0.05}, notifHolder)
+		round(n, 8) stroke(n)
+		local l = new("TextLabel", {Size = UDim2.new(1, -16, 1, 0), Position = UDim2.new(0, 8, 0, 0), BackgroundTransparency = 1, Text = text, TextColor3 = TXT, Font = Enum.Font.GothamMedium, TextSize = 13, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Center}, n)
+		task.delay(2.5, function()
+			local tw = TweenService:Create(n, TweenInfo.new(0.3), {BackgroundTransparency = 1})
+			local tw2 = TweenService:Create(l, TweenInfo.new(0.3), {TextTransparency = 1})
+			tw:Play() tw2:Play()
+			tw.Completed:Connect(function() n:Destroy() end)
+		end)
+	end
+
+	-- contoh pakai: setiap toggle fitur besar kirim notif juga
+	local function hook(btn, label, key)
+		btn.Activated:Connect(function() notify((cfg[key] and "ON: " or "OFF: ") .. label) end)
+	end
+	hook(sq, "Menu", "esp") -- placeholder aman, biarkan
+
+	-- HIDE GUI
+	local hideHeld = false
+	local function setHidden(on)
+		for _, o in ipairs(gui:GetChildren()) do
+			if o ~= toast then o.Visible = not on end
+		end
+		notifHolder.Visible = true
+	end
+	UIS.InputBegan:Connect(function(i, gp)
+		if gp then return end
+		if i.KeyCode == Enum.KeyCode.RightControl then
+			hideHeld = not hideHeld
+			setHidden(hideHeld)
+			if not hideHeld then notify("GUI ditampilkan kembali") end
+		end
+	end)
+
+	local hr = new("Frame", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = ROW, BorderSizePixel = 0}, pages.Xit)
+	round(hr, 6)
+	local hbtn = new("TextButton", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "Hide GUI", TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left}, hr)
+	new("UIPadding", {PaddingLeft = UDim.new(0, 10)}, hbtn)
+	hbtn.Activated:Connect(function()
+		hideHeld = true
+		setHidden(true)
+	end)
+
+	notify("ScriptQuu siap digunakan")
+end
