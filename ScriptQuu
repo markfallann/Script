@@ -909,3 +909,217 @@ end)
 
 refreshAll()
 updateWalk()
+-- XIT: FLY (tempel paling bawah)
+do
+	local FLD = {fly = false, flySpeed = 60, flyNoclip = false}
+	local fl = {}
+	pcall(function()
+		if readfile and isfile and isfile(FILE) then fl = HttpService:JSONDecode(readfile(FILE)) end
+	end)
+	for k, v in pairs(FLD) do
+		if fl[k] ~= nil then cfg[k] = fl[k] else cfg[k] = v end
+	end
+
+	local flyConn, noclipConn, bv, bg, curVel, curCF
+	local upHeld, downHeld = false, false
+	local shoulders, noclipStore = {}, nil
+
+	local function getParts()
+		local ch = lp.Character
+		return ch, ch and ch:FindFirstChildOfClass("Humanoid"), ch and ch:FindFirstChild("HumanoidRootPart")
+	end
+
+	-- tombol naik/turun (HP)
+	local flyUI = new("Frame", {AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -16, 0.5, 0), Size = UDim2.new(0, 54, 0, 116), BackgroundTransparency = 1, Visible = false}, gui)
+	new("UIListLayout", {Padding = UDim.new(0, 8)}, flyUI)
+	local function holdBtn(txt, set)
+		local b = new("TextButton", {Size = UDim2.new(0, 54, 0, 54), BackgroundColor3 = Color3.fromRGB(0, 0, 0), BackgroundTransparency = 0.15, Text = txt, TextColor3 = TXT, Font = Enum.Font.GothamBold, TextSize = 20, AutoButtonColor = false}, flyUI)
+		round(b, 12) stroke(b)
+		b.InputBegan:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then set(true) end
+		end)
+		b.InputEnded:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then set(false) end
+		end)
+	end
+	holdBtn("▲", function(v) upHeld = v end)
+	holdBtn("▼", function(v) downHeld = v end)
+
+	-- keyboard: Space/E naik, Q/Shift/Ctrl turun
+	UIS.InputBegan:Connect(function(i, gp)
+		if gp or not cfg.fly then return end
+		local k = i.KeyCode
+		if k == Enum.KeyCode.Space or k == Enum.KeyCode.E then upHeld = true end
+		if k == Enum.KeyCode.Q or k == Enum.KeyCode.LeftShift or k == Enum.KeyCode.LeftControl then downHeld = true end
+	end)
+	UIS.InputEnded:Connect(function(i)
+		local k = i.KeyCode
+		if k == Enum.KeyCode.Space or k == Enum.KeyCode.E then upHeld = false end
+		if k == Enum.KeyCode.Q or k == Enum.KeyCode.LeftShift or k == Enum.KeyCode.LeftControl then downHeld = false end
+	end)
+
+	-- pose tangan pahlawan (R15)
+	local function setArms(a)
+		for _, s in ipairs(shoulders) do
+			if s.m and s.m.Parent then s.m.C0 = s.c0 * CFrame.Angles(0, 0, s.sign * (math.pi - 0.15) * a) end
+		end
+	end
+
+	-- noclip
+	local function noclipOff()
+		if noclipStore then
+			for p, v in pairs(noclipStore) do
+				if p.Parent then p.CanCollide = v end
+			end
+			noclipStore = nil
+		end
+	end
+	local function applyNoclip()
+		if cfg.fly and cfg.flyNoclip then
+			if not noclipConn then
+				noclipConn = RunService.Stepped:Connect(function()
+					local ch = lp.Character
+					if not ch then return end
+					noclipStore = noclipStore or {}
+					for _, d in ipairs(ch:GetDescendants()) do
+						if d:IsA("BasePart") then
+							if noclipStore[d] == nil then noclipStore[d] = d.CanCollide end
+							d.CanCollide = false
+						end
+					end
+				end)
+			end
+		else
+			if noclipConn then noclipConn:Disconnect() noclipConn = nil end
+			noclipOff()
+		end
+	end
+
+	local function stopFly()
+		if flyConn then flyConn:Disconnect() flyConn = nil end
+		if noclipConn then noclipConn:Disconnect() noclipConn = nil end
+		noclipOff()
+		if bv then bv:Destroy() bv = nil end
+		if bg then bg:Destroy() bg = nil end
+		setArms(0)
+		shoulders = {}
+		local _, hum, root = getParts()
+		if hum then hum.PlatformStand = false hum.AutoRotate = true end
+		if root then
+			local f = Workspace.CurrentCamera.CFrame.LookVector * Vector3.new(1, 0, 1)
+			if f.Magnitude > 0.01 then root.CFrame = CFrame.lookAt(root.Position, root.Position + f) end
+			root.AssemblyLinearVelocity = Vector3.zero
+			root.AssemblyAngularVelocity = Vector3.zero
+		end
+		flyUI.Visible = false
+		upHeld, downHeld = false, false
+	end
+
+	local function startFly()
+		stopFly()
+		local ch, hum, root = getParts()
+		if not hum or not root then return end
+		hum.PlatformStand = true
+		hum.AutoRotate = false
+		bv = new("BodyVelocity", {MaxForce = Vector3.new(1e9, 1e9, 1e9), Velocity = Vector3.zero}, root)
+		bg = new("BodyGyro", {MaxTorque = Vector3.new(1e9, 1e9, 1e9), P = 20000, D = 800, CFrame = root.CFrame}, root)
+
+		shoulders = {}
+		local ra, la = ch:FindFirstChild("RightUpperArm"), ch:FindFirstChild("LeftUpperArm")
+		local rs = ra and ra:FindFirstChild("RightShoulder")
+		local ls = la and la:FindFirstChild("LeftShoulder")
+		if rs then table.insert(shoulders, {m = rs, c0 = rs.C0, sign = 1}) end
+		if ls then table.insert(shoulders, {m = ls, c0 = ls.C0, sign = -1}) end
+
+		curVel, curCF = Vector3.zero, root.CFrame
+		flyUI.Visible = true
+		applyNoclip()
+
+		local lastStop = 0
+		flyConn = RunService.Heartbeat:Connect(function(dt)
+			local _, h, r = getParts()
+			if not h or not r or not bv or not bv.Parent then return end
+			local c = Workspace.CurrentCamera
+			local look = c.CFrame.LookVector
+			local flatLook = Vector3.new(look.X, 0, look.Z)
+			flatLook = flatLook.Magnitude > 0.01 and flatLook.Unit or Vector3.new(0, 0, -1)
+			local flatRight = flatLook:Cross(Vector3.yAxis)
+
+			local md = h.MoveDirection
+			local fwd, rgt = md:Dot(flatLook), md:Dot(flatRight)
+			local vert = (upHeld and 1 or 0) - (downHeld and 1 or 0)
+
+			local target = (look * fwd + c.CFrame.RightVector * rgt) * cfg.flySpeed + Vector3.new(0, vert * cfg.flySpeed * 0.8, 0)
+			curVel = curVel:Lerp(target, math.clamp(dt * 8, 0, 1))
+			bv.Velocity = curVel
+
+			-- pose: hover tegak miring dikit, makin cepat makin horizontal ala Superman
+			local ratio = math.clamp(curVel.Magnitude / math.max(cfg.flySpeed, 1), 0, 1)
+			local dir = curVel.Magnitude > 1 and curVel.Unit or flatLook
+			local up = math.abs(dir.Y) > 0.95 and flatLook or Vector3.yAxis
+			local pos = r.Position
+			local hover = CFrame.lookAt(pos, pos + flatLook) * CFrame.Angles(math.rad(-8), 0, 0)
+			local bank = math.clamp(rgt, -1, 1) * 0.5 * ratio
+			local pose = CFrame.lookAt(pos, pos + dir, up) * CFrame.Angles(0, 0, -bank) * CFrame.Angles(math.rad(-90), 0, 0)
+			curCF = curCF:Lerp(hover:Lerp(pose, ratio), math.clamp(dt * 10, 0, 1))
+			bg.CFrame = curCF
+			setArms(math.clamp(ratio * 1.5, 0, 1))
+
+			-- matiin animasi jalan/jatuh
+			local now = os.clock()
+			if now - lastStop > 0.3 then
+				lastStop = now
+				local an = h:FindFirstChildOfClass("Animator")
+				if an then
+					for _, t in ipairs(an:GetPlayingAnimationTracks()) do t:Stop(0.1) end
+				end
+			end
+		end)
+	end
+
+	lp.CharacterAdded:Connect(function()
+		if cfg.fly then
+			task.wait(1.5)
+			if cfg.fly then startFly() end
+		end
+	end)
+
+	-- PANEL
+	local pFly, lFly = makePanel("Fly Settings", 190)
+	optRow(lFly, {{30, "Pelan"}, {60, "Normal"}, {120, "Cepat"}, {250, "Turbo"}}, "flySpeed")
+	stepRow(lFly, "Speed", "flySpeed", 10, 10, 300, refreshAll)
+	optRow(lFly, {{true, "Noclip On"}, {false, "Noclip Off"}}, "flyNoclip", applyNoclip)
+
+	-- BARIS MENU XIT
+	local r = new("Frame", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = ROW, BorderSizePixel = 0}, pages.Xit)
+	round(r, 6)
+	local b = new("TextButton", {Size = UDim2.new(1, -36, 1, 0), BackgroundTransparency = 1, Text = "Fly", TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left}, r)
+	new("UIPadding", {PaddingLeft = UDim.new(0, 10)}, b)
+	local dot = new("Frame", {Size = UDim2.new(0, 8, 0, 8), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), BackgroundColor3 = Color3.fromRGB(70, 70, 70)}, b)
+	round(dot, 4)
+	local function refresh()
+		dot.BackgroundColor3 = cfg.fly and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(70, 70, 70)
+		b.TextColor3 = cfg.fly and TXT or DIM
+	end
+	table.insert(refreshers, refresh)
+	b.Activated:Connect(function()
+		cfg.fly = not cfg.fly
+		refresh()
+		save()
+		if cfg.fly then startFly() else stopFly() end
+	end)
+	local g = new("TextButton", {Position = UDim2.new(1, -34, 0, 2), Size = UDim2.new(0, 30, 0, 30), BackgroundTransparency = 1, Text = "⚙️", TextColor3 = TXT, TextSize = 16, Font = Enum.Font.Gotham}, r)
+	g.Activated:Connect(function() pFly.Visible = not pFly.Visible end)
+
+	table.insert(allPanels, pFly)
+	pFly:GetPropertyChangedSignal("Visible"):Connect(function()
+		if pFly.Visible then
+			for _, o in ipairs(allPanels) do
+				if o ~= pFly then o.Visible = false end
+			end
+		end
+	end)
+
+	refreshAll()
+	if cfg.fly then startFly() end
+end
