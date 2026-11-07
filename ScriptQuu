@@ -1123,3 +1123,63 @@ do
 	refreshAll()
 	if cfg.fly then startFly() end
 end
+-- XIT: NOCLIP (tempel paling bawah)
+do
+	local ND = {noclip = false}
+	local ns = {}
+	pcall(function()
+		if readfile and isfile and isfile(FILE) then ns = HttpService:JSONDecode(readfile(FILE)) end
+	end)
+	for k, v in pairs(ND) do
+		if ns[k] ~= nil then cfg[k] = ns[k] else cfg[k] = v end
+	end
+
+	local conn, store
+
+	local function off()
+		if conn then conn:Disconnect() conn = nil end
+		if store then
+			for p in pairs(store) do
+				if p.Parent then p.CanCollide = true end
+			end
+			store = nil
+		end
+	end
+
+	local function on()
+		if conn then return end
+		store = {}
+		conn = RunService.Stepped:Connect(function()
+			local ch = lp.Character
+			if not ch then return end
+			for _, d in ipairs(ch:GetDescendants()) do
+				if d:IsA("BasePart") then
+					if store[d] == nil and d.CanCollide then store[d] = true end
+					d.CanCollide = false
+				end
+			end
+		end)
+	end
+
+	-- BARIS MENU XIT
+	local r = new("Frame", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = ROW, BorderSizePixel = 0}, pages.Xit)
+	round(r, 6)
+	local b = new("TextButton", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "Noclip", TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left}, r)
+	new("UIPadding", {PaddingLeft = UDim.new(0, 10)}, b)
+	local dot = new("Frame", {Size = UDim2.new(0, 8, 0, 8), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), BackgroundColor3 = Color3.fromRGB(70, 70, 70)}, b)
+	round(dot, 4)
+	local function refresh()
+		dot.BackgroundColor3 = cfg.noclip and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(70, 70, 70)
+		b.TextColor3 = cfg.noclip and TXT or DIM
+	end
+	table.insert(refreshers, refresh)
+	b.Activated:Connect(function()
+		cfg.noclip = not cfg.noclip
+		refresh()
+		save()
+		if cfg.noclip then on() else off() end
+	end)
+
+	refreshAll()
+	if cfg.noclip then on() end
+end
