@@ -1482,3 +1482,66 @@ do
 
 	notify("ScriptQuu siap digunakan")
 end
+-- VISUAL: LOW GRAPHICS MODE (tempel paling bawah)
+do
+	cfg.lowgfx = false
+	local LG = {}
+	pcall(function() if readfile and isfile and isfile(FILE) then LG = HttpService:JSONDecode(readfile(FILE)) end end)
+	if LG.lowgfx ~= nil then cfg.lowgfx = LG.lowgfx end
+
+	local stored, matStore = {}, {}
+
+	local function apply(on)
+		if on then
+			for _, d in ipairs(Workspace:GetDescendants()) do
+				if d:IsA("ParticleEmitter") or d:IsA("Trail") or d:IsA("Smoke") or d:IsA("Fire") or d:IsA("Sparkles") then
+					if stored[d] == nil then stored[d] = d.Enabled end
+					d.Enabled = false
+				elseif d:IsA("BasePart") and d.Material ~= Enum.Material.Plastic then
+					if matStore[d] == nil then matStore[d] = d.Material end
+					d.Material = Enum.Material.Plastic
+				end
+			end
+			Lighting.GlobalShadows = false
+			settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+		else
+			for d, v in pairs(stored) do if d.Parent then d.Enabled = v end end
+			for d, v in pairs(matStore) do if d.Parent then d.Material = v end end
+			stored, matStore = {}, {}
+			Lighting.GlobalShadows = L0.GlobalShadows
+			settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+		end
+	end
+
+	Workspace.DescendantAdded:Connect(function(d)
+		if not cfg.lowgfx then return end
+		task.defer(function()
+			if d:IsA("ParticleEmitter") or d:IsA("Trail") or d:IsA("Smoke") or d:IsA("Fire") or d:IsA("Sparkles") then
+				d.Enabled = false
+			elseif d:IsA("BasePart") then
+				d.Material = Enum.Material.Plastic
+			end
+		end)
+	end)
+
+	local lr = new("Frame", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = ROW, BorderSizePixel = 0}, pages.Visual)
+	round(lr, 6)
+	local lb = new("TextButton", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "Low Graphics Mode", TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left}, lr)
+	new("UIPadding", {PaddingLeft = UDim.new(0, 10)}, lb)
+	local ldot = new("Frame", {Size = UDim2.new(0, 8, 0, 8), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), BackgroundColor3 = Color3.fromRGB(70, 70, 70)}, lb)
+	round(ldot, 4)
+	local function lRefresh()
+		ldot.BackgroundColor3 = cfg.lowgfx and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(70, 70, 70)
+		lb.TextColor3 = cfg.lowgfx and TXT or DIM
+	end
+	table.insert(refreshers, lRefresh)
+	lb.Activated:Connect(function()
+		cfg.lowgfx = not cfg.lowgfx
+		lRefresh()
+		save()
+		apply(cfg.lowgfx)
+	end)
+
+	refreshAll()
+	if cfg.lowgfx then apply(true) end
+end
