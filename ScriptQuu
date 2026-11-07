@@ -728,3 +728,184 @@ pHit:GetPropertyChangedSignal("Visible"):Connect(function()
 end)
 
 refreshAll()
+-- XIT: SPEED CHANGER (tempel paling bawah)
+local SD = {speed = false, speedVal = 16}
+local ssaved = {}
+pcall(function()
+	if readfile and isfile and isfile(FILE) then ssaved = HttpService:JSONDecode(readfile(FILE)) end
+end)
+for k, v in pairs(SD) do
+	if ssaved[k] ~= nil then cfg[k] = ssaved[k] else cfg[k] = v end
+end
+
+RunService.Heartbeat:Connect(function()
+	if not cfg.speed then return end
+	local h = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+	if h then h.WalkSpeed = cfg.speedVal end
+end)
+
+-- panel setting
+local pSpd, lSpd = makePanel("Speed Settings", 130)
+optRow(lSpd, {{16, "16"}, {50, "50"}, {100, "100"}, {200, "200"}}, "speedVal")
+stepRow(lSpd, "Speed", "speedVal", 5, 1, 500, refreshAll)
+
+-- baris di menu Xit
+local sr = new("Frame", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = ROW, BorderSizePixel = 0}, pages.Xit)
+round(sr, 6)
+local sb = new("TextButton", {Size = UDim2.new(1, -36, 1, 0), BackgroundTransparency = 1, Text = "Speed Changer", TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left}, sr)
+new("UIPadding", {PaddingLeft = UDim.new(0, 10)}, sb)
+local sdot = new("Frame", {Size = UDim2.new(0, 8, 0, 8), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), BackgroundColor3 = Color3.fromRGB(70, 70, 70)}, sb)
+round(sdot, 4)
+local function srRefresh()
+	sdot.BackgroundColor3 = cfg.speed and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(70, 70, 70)
+	sb.TextColor3 = cfg.speed and TXT or DIM
+end
+table.insert(refreshers, srRefresh)
+sb.Activated:Connect(function()
+	cfg.speed = not cfg.speed
+	srRefresh()
+	save()
+	if not cfg.speed then
+		local h = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+		if h then h.WalkSpeed = 16 end
+	end
+end)
+local sg = new("TextButton", {Position = UDim2.new(1, -34, 0, 2), Size = UDim2.new(0, 30, 0, 30), BackgroundTransparency = 1, Text = "⚙️", TextColor3 = TXT, TextSize = 16, Font = Enum.Font.Gotham}, sr)
+sg.Activated:Connect(function() pSpd.Visible = not pSpd.Visible end)
+
+table.insert(allPanels, pSpd)
+pSpd:GetPropertyChangedSignal("Visible"):Connect(function()
+	if pSpd.Visible then
+		for _, o in ipairs(allPanels) do
+			if o ~= pSpd then o.Visible = false end
+		end
+	end
+end)
+
+refreshAll()
+-- XIT: FLING (tempel paling bawah)
+local FD = {fling = false, flingMode = "click", flingTime = 0.25}
+local fsaved = {}
+pcall(function()
+	if readfile and isfile and isfile(FILE) then fsaved = HttpService:JSONDecode(readfile(FILE)) end
+end)
+for k, v in pairs(FD) do
+	if fsaved[k] ~= nil then cfg[k] = fsaved[k] else cfg[k] = v end
+end
+
+local mouse = lp:GetMouse()
+local flinging = false
+
+local function setInvisible(ch, on)
+	for _, d in ipairs(ch:GetDescendants()) do
+		if d:IsA("BasePart") then d.LocalTransparencyModifier = on and 1 or 0 end
+	end
+end
+
+-- CLICK FLING
+local function flingTarget(tp)
+	local ch = lp.Character
+	local root = ch and ch:FindFirstChild("HumanoidRootPart")
+	local tch = tp.Character
+	local troot = tch and tch:FindFirstChild("HumanoidRootPart")
+	if flinging or not root or not troot then return end
+	flinging = true
+
+	local origin = root.CFrame
+	local c = Workspace.CurrentCamera
+	local camCF, camType = c.CFrame, c.CameraType
+	c.CameraType = Enum.CameraType.Scriptable
+	c.CFrame = camCF
+	setInvisible(ch, true)
+
+	local t0 = os.clock()
+	while os.clock() - t0 < cfg.flingTime and troot.Parent and root.Parent do
+		root.CFrame = troot.CFrame
+		root.AssemblyAngularVelocity = Vector3.new(0, 9e5, 0)
+		root.AssemblyLinearVelocity = Vector3.new(9e4, 9e4, 9e4)
+		RunService.Heartbeat:Wait()
+	end
+
+	-- balik ke posisi awal + anti fall damage
+	for _ = 1, 12 do
+		root.CFrame = origin
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+		RunService.Heartbeat:Wait()
+	end
+
+	setInvisible(ch, false)
+	c.CameraType = camType
+	flinging = false
+end
+
+UIS.InputBegan:Connect(function(i, gp)
+	if gp or not cfg.fling or cfg.flingMode ~= "click" then return end
+	if i.UserInputType ~= Enum.UserInputType.MouseButton1 and i.UserInputType ~= Enum.UserInputType.Touch then return end
+	local t = mouse.Target
+	local m = t and t:FindFirstAncestorOfClass("Model")
+	local p = m and Players:GetPlayerFromCharacter(m)
+	if p and p ~= lp then task.spawn(flingTarget, p) end
+end)
+
+-- WALK FLING
+local walkRun = false
+local function updateWalk()
+	if cfg.fling and cfg.flingMode == "walk" and not walkRun then
+		walkRun = true
+		task.spawn(function()
+			while cfg.fling and cfg.flingMode == "walk" do
+				RunService.Heartbeat:Wait()
+				local ch = lp.Character
+				local root = ch and ch:FindFirstChild("HumanoidRootPart")
+				if root then
+					local vel = root.AssemblyLinearVelocity
+					root.AssemblyLinearVelocity = vel * 10000 + Vector3.new(0, 10000, 0)
+					RunService.RenderStepped:Wait()
+					root.AssemblyLinearVelocity = vel
+					RunService.Stepped:Wait()
+					root.AssemblyLinearVelocity = vel + Vector3.new(0, 0.1, 0)
+				end
+			end
+			walkRun = false
+		end)
+	end
+end
+
+-- PANEL
+local pFling, lFling = makePanel("Fling Settings", 130)
+optRow(lFling, {{"click", "Click Fling"}, {"walk", "Walk Fling"}}, "flingMode", updateWalk)
+optRow(lFling, {{0.15, "Cepat"}, {0.25, "Normal"}, {0.4, "Kuat"}}, "flingTime")
+
+-- BARIS MENU XIT
+local fr = new("Frame", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = ROW, BorderSizePixel = 0}, pages.Xit)
+round(fr, 6)
+local fb2 = new("TextButton", {Size = UDim2.new(1, -36, 1, 0), BackgroundTransparency = 1, Text = "Fling", TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left}, fr)
+new("UIPadding", {PaddingLeft = UDim.new(0, 10)}, fb2)
+local fdot = new("Frame", {Size = UDim2.new(0, 8, 0, 8), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), BackgroundColor3 = Color3.fromRGB(70, 70, 70)}, fb2)
+round(fdot, 4)
+local function frRefresh()
+	fdot.BackgroundColor3 = cfg.fling and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(70, 70, 70)
+	fb2.TextColor3 = cfg.fling and TXT or DIM
+end
+table.insert(refreshers, frRefresh)
+fb2.Activated:Connect(function()
+	cfg.fling = not cfg.fling
+	frRefresh()
+	save()
+	updateWalk()
+end)
+local fg = new("TextButton", {Position = UDim2.new(1, -34, 0, 2), Size = UDim2.new(0, 30, 0, 30), BackgroundTransparency = 1, Text = "⚙️", TextColor3 = TXT, TextSize = 16, Font = Enum.Font.Gotham}, fr)
+fg.Activated:Connect(function() pFling.Visible = not pFling.Visible end)
+
+table.insert(allPanels, pFling)
+pFling:GetPropertyChangedSignal("Visible"):Connect(function()
+	if pFling.Visible then
+		for _, o in ipairs(allPanels) do
+			if o ~= pFling then o.Visible = false end
+		end
+	end
+end)
+
+refreshAll()
+updateWalk()
