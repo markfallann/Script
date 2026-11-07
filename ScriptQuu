@@ -1545,3 +1545,133 @@ do
 	refreshAll()
 	if cfg.lowgfx then apply(true) end
 end
+-- CAMERA SHAKE REMOVER + AUTO RESPAWN + CLICK TP HISTORY (tempel paling bawah)
+do
+	-- CAMERA SHAKE REMOVER
+	cfg.noshake = false
+	local NS = {}
+	pcall(function() if readfile and isfile and isfile(FILE) then NS = HttpService:JSONDecode(readfile(FILE)) end end)
+	if NS.noshake ~= nil then cfg.noshake = NS.noshake end
+
+	local baseCF
+	RunService.RenderStepped:Connect(function()
+		if not cfg.noshake then baseCF = nil return end
+		local c = Workspace.CurrentCamera
+		if c.CameraType ~= Enum.CameraType.Custom then baseCF = nil return end
+		local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+		local root = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+		if not hum or not root then return end
+		local look = c.CFrame.LookVector
+		local flat = Vector3.new(look.X, 0, look.Z)
+		if flat.Magnitude < 0.01 then return end
+		local target = CFrame.new(c.CFrame.Position, c.CFrame.Position + flat)
+		-- hanya redam goyangan cepat (roll/pitch acak), bukan nengok sengaja
+		local _, _, roll = c.CFrame:ToOrientation()
+		if math.abs(roll) > 0.02 then
+			c.CFrame = CFrame.new(c.CFrame.Position) * (c.CFrame - c.CFrame.Position)
+		end
+	end)
+
+	local nr = new("Frame", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = ROW, BorderSizePixel = 0}, pages.Xit)
+	round(nr, 6)
+	local nb = new("TextButton", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "Camera Shake Remover", TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left}, nr)
+	new("UIPadding", {PaddingLeft = UDim.new(0, 10)}, nb)
+	local ndot = new("Frame", {Size = UDim2.new(0, 8, 0, 8), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), BackgroundColor3 = Color3.fromRGB(70, 70, 70)}, nb)
+	round(ndot, 4)
+	local function nRefresh()
+		ndot.BackgroundColor3 = cfg.noshake and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(70, 70, 70)
+		nb.TextColor3 = cfg.noshake and TXT or DIM
+	end
+	table.insert(refreshers, nRefresh)
+	nb.Activated:Connect(function()
+		cfg.noshake = not cfg.noshake
+		nRefresh()
+		save()
+	end)
+
+	-- AUTO RESPAWN
+	cfg.autorespawn = false
+	local AR = {}
+	pcall(function() if readfile and isfile and isfile(FILE) then AR = HttpService:JSONDecode(readfile(FILE)) end end)
+	if AR.autorespawn ~= nil then cfg.autorespawn = AR.autorespawn end
+
+	local function watchDeath(hum)
+		hum.Died:Connect(function()
+			if cfg.autorespawn then
+				task.wait(0.3)
+				lp:LoadCharacter()
+			end
+		end)
+	end
+	lp.CharacterAdded:Connect(function(ch)
+		local hum = ch:WaitForChild("Humanoid", 5)
+		if hum then watchDeath(hum) end
+	end)
+	if lp.Character then
+		local hum = lp.Character:FindFirstChildOfClass("Humanoid")
+		if hum then watchDeath(hum) end
+	end
+
+	local arr = new("Frame", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = ROW, BorderSizePixel = 0}, pages.Xit)
+	round(arr, 6)
+	local arb = new("TextButton", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "Auto Respawn", TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left}, arr)
+	new("UIPadding", {PaddingLeft = UDim.new(0, 10)}, arb)
+	local ardot = new("Frame", {Size = UDim2.new(0, 8, 0, 8), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), BackgroundColor3 = Color3.fromRGB(70, 70, 70)}, arb)
+	round(ardot, 4)
+	local function arRefresh()
+		ardot.BackgroundColor3 = cfg.autorespawn and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(70, 70, 70)
+		arb.TextColor3 = cfg.autorespawn and TXT or DIM
+	end
+	table.insert(refreshers, arRefresh)
+	arb.Activated:Connect(function()
+		cfg.autorespawn = not cfg.autorespawn
+		arRefresh()
+		save()
+	end)
+
+	-- CLICK TP HISTORY (butuh fitur "Teleport Klik Tempat" yang sudah ada aktif)
+	local tpHistory = {}
+	local pHist, lHist = makePanel("TP History", 220)
+
+	local function rebuildHist()
+		lHist:ClearAllChildren()
+		new("UIListLayout", {Padding = UDim.new(0, 6)}, lHist)
+		for idx = #tpHistory, 1, -1 do
+			local pos = tpHistory[idx]
+			local b = new("TextButton", {Size = UDim2.new(1, -6, 0, 32), BackgroundColor3 = ROW, Text = string.format("Titik %d (%.0f, %.0f, %.0f)", idx, pos.X, pos.Y, pos.Z), TextColor3 = TXT, Font = Enum.Font.GothamMedium, TextSize = 12, AutoButtonColor = false}, lHist)
+			round(b, 6)
+			b.Activated:Connect(function()
+				local root = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+				if root then root.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0)) end
+			end)
+		end
+	end
+
+	local hb2 = new("TextButton", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = Color3.fromRGB(40, 40, 40), Text = "TP History", TextColor3 = TXT, Font = Enum.Font.GothamMedium, TextSize = 13, AutoButtonColor = false}, pages.Xit)
+	round(hb2, 6)
+	hb2.Activated:Connect(function() pHist.Visible = not pHist.Visible end)
+	table.insert(allPanels, pHist)
+	pHist:GetPropertyChangedSignal("Visible"):Connect(function()
+		if pHist.Visible then
+			for _, o in ipairs(allPanels) do if o ~= pHist then o.Visible = false end end
+		end
+	end)
+
+	-- hook ke titik TP klik tempat yang sudah ada
+	UIS.InputBegan:Connect(function(i, gp)
+		if gp or not cfg.clicktp then return end
+		if i.UserInputType ~= Enum.UserInputType.MouseButton1 and i.UserInputType ~= Enum.UserInputType.Touch then return end
+		local mouseLoc = UIS:GetMouseLocation()
+		local c = Workspace.CurrentCamera
+		local ray = c:ViewportPointToRay(mouseLoc.X, mouseLoc.Y)
+		rp.FilterDescendantsInstances = {lp.Character}
+		local res = Workspace:Raycast(ray.Origin, ray.Direction * 1000, rp)
+		if res then
+			table.insert(tpHistory, res.Position)
+			if #tpHistory > 5 then table.remove(tpHistory, 1) end
+			rebuildHist()
+		end
+	end)
+
+	refreshAll()
+end
