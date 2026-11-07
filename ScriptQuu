@@ -421,3 +421,215 @@ end)
 
 refreshAll()
 if cfg.korles then applyKorles() end
+-- FOV / FULLBRIGHT / NO FOG / CROSSHAIR / WAKTU (tempel paling bawah)
+local Lighting = game:GetService("Lighting")
+
+local D = {fov = false, fovVal = 90, fb = false, nofog = false, cross = false, crossShape = "plus", crossColor = 1, crossSize = 10, timeOn = false, timeVal = 12}
+local saved = {}
+pcall(function()
+	if readfile and isfile and isfile(FILE) then saved = HttpService:JSONDecode(readfile(FILE)) end
+end)
+for k, v in pairs(D) do
+	if saved[k] ~= nil then cfg[k] = saved[k] else cfg[k] = v end
+end
+
+-- nilai asli
+local L0 = {Brightness = Lighting.Brightness, ClockTime = Lighting.ClockTime, GlobalShadows = Lighting.GlobalShadows, Ambient = Lighting.Ambient, OutdoorAmbient = Lighting.OutdoorAmbient, FogStart = Lighting.FogStart, FogEnd = Lighting.FogEnd}
+local atm0 = Lighting:FindFirstChildOfClass("Atmosphere")
+local A0 = atm0 and {Density = atm0.Density, Haze = atm0.Haze}
+local FOV0 = cam.FieldOfView
+
+local function restoreFB()
+	Lighting.Brightness = L0.Brightness
+	Lighting.GlobalShadows = L0.GlobalShadows
+	Lighting.Ambient = L0.Ambient
+	Lighting.OutdoorAmbient = L0.OutdoorAmbient
+end
+local function restoreFog()
+	Lighting.FogStart = L0.FogStart
+	Lighting.FogEnd = L0.FogEnd
+	local a = Lighting:FindFirstChildOfClass("Atmosphere")
+	if a and A0 then a.Density = A0.Density a.Haze = A0.Haze end
+end
+
+RunService.Heartbeat:Connect(function()
+	local c = Workspace.CurrentCamera
+	if cfg.fov and c then c.FieldOfView = cfg.fovVal end
+	if cfg.fb then
+		Lighting.Brightness = 2
+		Lighting.GlobalShadows = false
+		Lighting.Ambient = Color3.fromRGB(200, 200, 200)
+		Lighting.OutdoorAmbient = Color3.fromRGB(200, 200, 200)
+	end
+	if cfg.nofog then
+		Lighting.FogStart = 1e5
+		Lighting.FogEnd = 1e6
+		local a = Lighting:FindFirstChildOfClass("Atmosphere")
+		if a then a.Density = 0 a.Haze = 0 end
+	end
+	if cfg.timeOn then Lighting.ClockTime = cfg.timeVal end
+end)
+
+-- HELPER UI
+local extraPanels = {}
+local function makePanel(title, h)
+	local p = new("Frame", {AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(0, -8, 0, 0), Size = UDim2.new(0, 230, 0, h), BackgroundColor3 = BG, Visible = false, Active = true}, menu)
+	round(p, 8) stroke(p)
+	new("TextLabel", {Position = UDim2.new(0, 10, 0, 6), Size = UDim2.new(1, -20, 0, 24), BackgroundTransparency = 1, Text = title, TextColor3 = TXT, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left}, p)
+	local l = new("ScrollingFrame", {Position = UDim2.new(0, 6, 0, 34), Size = UDim2.new(1, -12, 1, -40), BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3, AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new()}, p)
+	new("UIListLayout", {Padding = UDim.new(0, 6)}, l)
+	table.insert(extraPanels, p)
+	return p, l
+end
+
+local function row3(label, key, panel, onChange)
+	local r = new("Frame", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = ROW, BorderSizePixel = 0}, pages.Visual)
+	round(r, 6)
+	local b = new("TextButton", {Size = UDim2.new(1, panel and -36 or 0, 1, 0), BackgroundTransparency = 1, Text = label, TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left}, r)
+	new("UIPadding", {PaddingLeft = UDim.new(0, 10)}, b)
+	local dot = new("Frame", {Size = UDim2.new(0, 8, 0, 8), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), BackgroundColor3 = Color3.fromRGB(70, 70, 70)}, b)
+	round(dot, 4)
+	local function refresh()
+		local on = cfg[key]
+		dot.BackgroundColor3 = on and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(70, 70, 70)
+		b.TextColor3 = on and TXT or DIM
+	end
+	table.insert(refreshers, refresh)
+	b.Activated:Connect(function()
+		cfg[key] = not cfg[key]
+		refresh()
+		save()
+		if onChange then onChange() end
+	end)
+	if panel then
+		local g = new("TextButton", {Position = UDim2.new(1, -34, 0, 2), Size = UDim2.new(0, 30, 0, 30), BackgroundTransparency = 1, Text = "⚙️", TextColor3 = TXT, TextSize = 16, Font = Enum.Font.Gotham}, r)
+		g.Activated:Connect(function() panel.Visible = not panel.Visible end)
+	end
+	refresh()
+end
+
+local function stepRow(parent, label, key, step, mn, mx, onChange)
+	local r = new("Frame", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = ROW, BorderSizePixel = 0}, parent)
+	round(r, 6)
+	local lbl = new("TextLabel", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, TextColor3 = TXT, Font = Enum.Font.GothamMedium, TextSize = 13}, r)
+	local function refresh() lbl.Text = label .. ": " .. tostring(cfg[key]) end
+	table.insert(refreshers, refresh)
+	local function btn(txt, x, d)
+		local b = new("TextButton", {Size = UDim2.new(0, 30, 0, 30), Position = UDim2.new(x, x == 0 and 2 or -32, 0, 2), BackgroundColor3 = Color3.fromRGB(40, 40, 40), Text = txt, TextColor3 = TXT, Font = Enum.Font.GothamBold, TextSize = 16, AutoButtonColor = false}, r)
+		round(b, 6)
+		b.Activated:Connect(function()
+			cfg[key] = math.clamp(cfg[key] + d, mn, mx)
+			refresh()
+			save()
+			if onChange then onChange() end
+		end)
+	end
+	btn("-", 0, -step)
+	btn("+", 1, step)
+	refresh()
+end
+
+local function optRow(parent, items, key, onPick)
+	local f = new("Frame", {Size = UDim2.new(1, -6, 0, 34), BackgroundTransparency = 1}, parent)
+	new("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4)}, f)
+	for _, it in ipairs(items) do
+		local b = new("TextButton", {Size = UDim2.new(1 / #items, -4, 1, 0), BackgroundColor3 = ROW, Text = it[2], Font = Enum.Font.GothamMedium, TextSize = 12, TextColor3 = DIM, AutoButtonColor = false}, f)
+		round(b, 6)
+		local function refresh()
+			local s = cfg[key] == it[1]
+			b.TextColor3 = s and TXT or DIM
+			b.BackgroundColor3 = s and Color3.fromRGB(40, 40, 40) or ROW
+		end
+		table.insert(refreshers, refresh)
+		b.Activated:Connect(function()
+			cfg[key] = it[1]
+			refreshAll()
+			save()
+			if onPick then onPick() end
+		end)
+		refresh()
+	end
+end
+
+-- CROSSHAIR
+local COLORS = {Color3.fromRGB(255, 255, 255), Color3.fromRGB(255, 60, 60), Color3.fromRGB(60, 255, 90), Color3.fromRGB(60, 220, 255), Color3.fromRGB(255, 230, 60)}
+local chHolder = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0), Size = UDim2.new(0, 0, 0, 0), BackgroundTransparency = 1, ZIndex = 5}, gui)
+
+local function drawCross()
+	chHolder:ClearAllChildren()
+	chHolder.Visible = cfg.cross
+	local col = COLORS[cfg.crossColor] or COLORS[1]
+	local s = cfg.crossSize
+	local function bar(ax, ay, px, py, w, h)
+		new("Frame", {AnchorPoint = Vector2.new(ax, ay), Position = UDim2.new(0, px, 0, py), Size = UDim2.new(0, w, 0, h), BackgroundColor3 = col, BorderSizePixel = 0}, chHolder)
+	end
+	if cfg.crossShape == "plus" then
+		bar(1, 0.5, -4, 0, s, 2) bar(0, 0.5, 4, 0, s, 2) bar(0.5, 1, 0, -4, 2, s) bar(0.5, 0, 0, 4, 2, s)
+	elseif cfg.crossShape == "dot" then
+		local d = math.max(3, s / 2)
+		local f = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.new(0, d, 0, d), BackgroundColor3 = col, BorderSizePixel = 0}, chHolder)
+		round(f, 100)
+	else
+		local c = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.new(0, s * 2, 0, s * 2), BackgroundTransparency = 1}, chHolder)
+		new("UIStroke", {Color = col, Thickness = 2}, c)
+		round(c, 100)
+	end
+end
+
+-- PANEL
+local pFov, lFov = makePanel("FOV Settings", 90)
+stepRow(lFov, "FOV", "fovVal", 5, 40, 120)
+
+local pCross, lCross = makePanel("Crosshair Settings", 180)
+optRow(lCross, {{"plus", "Plus"}, {"dot", "Titik"}, {"circle", "Lingkaran"}}, "crossShape", drawCross)
+local cf = new("Frame", {Size = UDim2.new(1, -6, 0, 30), BackgroundTransparency = 1}, lCross)
+new("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6)}, cf)
+for i, c in ipairs(COLORS) do
+	local b = new("TextButton", {Size = UDim2.new(0, 30, 0, 30), BackgroundColor3 = c, Text = "", AutoButtonColor = false}, cf)
+	round(b, 6)
+	local s = new("UIStroke", {Color = Color3.new(1, 1, 1), Thickness = 2, Enabled = false}, b)
+	local function refresh() s.Enabled = cfg.crossColor == i end
+	table.insert(refreshers, refresh)
+	b.Activated:Connect(function()
+		cfg.crossColor = i
+		refreshAll()
+		save()
+		drawCross()
+	end)
+	refresh()
+end
+stepRow(lCross, "Ukuran", "crossSize", 2, 4, 30, drawCross)
+
+local pTime, lTime = makePanel("Waktu Settings", 90)
+optRow(lTime, {{6, "Pagi"}, {12, "Siang"}, {17.5, "Sore"}, {0, "Malam"}}, "timeVal")
+
+-- BARIS MENU VISUAL
+row3("FOV Changer", "fov", pFov, function()
+	if not cfg.fov then
+		local c = Workspace.CurrentCamera
+		if c then c.FieldOfView = FOV0 end
+	end
+end)
+row3("Fullbright", "fb", nil, function() if not cfg.fb then restoreFB() end end)
+row3("No Fog", "nofog", nil, function() if not cfg.nofog then restoreFog() end end)
+row3("Crosshair", "cross", pCross, drawCross)
+row3("Waktu Custom", "timeOn", pTime, function()
+	if not cfg.timeOn then Lighting.ClockTime = L0.ClockTime end
+end)
+
+-- hanya 1 panel setting terbuka
+local allPanels = {sp}
+if sp2 then table.insert(allPanels, sp2) end
+for _, p in ipairs(extraPanels) do table.insert(allPanels, p) end
+for _, p in ipairs(allPanels) do
+	p:GetPropertyChangedSignal("Visible"):Connect(function()
+		if p.Visible then
+			for _, o in ipairs(allPanels) do
+				if o ~= p then o.Visible = false end
+			end
+		end
+	end)
+end
+
+refreshAll()
+drawCross()
