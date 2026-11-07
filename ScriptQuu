@@ -633,3 +633,98 @@ end
 
 refreshAll()
 drawCross()
+-- HIT MARKER (tempel paling bawah)
+local TweenService = game:GetService("TweenService")
+
+local HD = {hit = false, hitColor = 2, hitSize = 8, hitSound = true}
+local hsaved = {}
+pcall(function()
+	if readfile and isfile and isfile(FILE) then hsaved = HttpService:JSONDecode(readfile(FILE)) end
+end)
+for k, v in pairs(HD) do
+	if hsaved[k] ~= nil then cfg[k] = hsaved[k] else cfg[k] = v end
+end
+
+local hitSnd = new("Sound", {SoundId = "rbxasset://sounds/electronicpingshort.wav", Volume = 1, PlaybackSpeed = 1.7}, SoundService)
+local lastShot = 0
+
+UIS.InputBegan:Connect(function(i, gp)
+	if gp then return end
+	if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+		lastShot = os.clock()
+	end
+end)
+
+local function showHit()
+	local col = COLORS[cfg.hitColor] or COLORS[2]
+	local s = cfg.hitSize
+	local off = 5 + s * 0.35
+	for _, sx in ipairs({1, -1}) do
+		for _, sy in ipairs({1, -1}) do
+			local f = new("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, sx * off, 0.5, sy * off),
+				Size = UDim2.new(0, s, 0, 2), Rotation = (sx * sy == 1) and 45 or -45,
+				BackgroundColor3 = col, BorderSizePixel = 0, ZIndex = 6,
+			}, gui)
+			local tw = TweenService:Create(f, TweenInfo.new(0.3), {BackgroundTransparency = 1})
+			tw:Play()
+			tw.Completed:Connect(function() f:Destroy() end)
+		end
+	end
+	if cfg.hitSound then
+		hitSnd:Play()
+	end
+end
+
+local function watch(p)
+	if p == lp then return end
+	local function hook(ch)
+		local hum = ch:WaitForChild("Humanoid", 5)
+		if not hum then return end
+		local last = hum.Health
+		hum.HealthChanged:Connect(function(h)
+			if h < last and cfg.hit and os.clock() - lastShot < 0.5 and lp.Character and lp.Character:FindFirstChildOfClass("Tool") then
+				showHit()
+			end
+			last = h
+		end)
+	end
+	if p.Character then task.spawn(hook, p.Character) end
+	p.CharacterAdded:Connect(hook)
+end
+for _, p in ipairs(Players:GetPlayers()) do watch(p) end
+Players.PlayerAdded:Connect(watch)
+
+-- PANEL
+local pHit, lHit = makePanel("Hit Marker Settings", 190)
+local hf = new("Frame", {Size = UDim2.new(1, -6, 0, 30), BackgroundTransparency = 1}, lHit)
+new("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6)}, hf)
+for i, c in ipairs(COLORS) do
+	local b = new("TextButton", {Size = UDim2.new(0, 30, 0, 30), BackgroundColor3 = c, Text = "", AutoButtonColor = false}, hf)
+	round(b, 6)
+	local s = new("UIStroke", {Color = Color3.new(1, 1, 1), Thickness = 2, Enabled = false}, b)
+	local function refresh() s.Enabled = cfg.hitColor == i end
+	table.insert(refreshers, refresh)
+	b.Activated:Connect(function()
+		cfg.hitColor = i
+		refreshAll()
+		save()
+		showHit()
+	end)
+	refresh()
+end
+stepRow(lHit, "Ukuran", "hitSize", 2, 4, 16, showHit)
+optRow(lHit, {{true, "Suara On"}, {false, "Suara Off"}}, "hitSound")
+
+row3("Hit Marker", "hit", pHit)
+
+table.insert(allPanels, pHit)
+pHit:GetPropertyChangedSignal("Visible"):Connect(function()
+	if pHit.Visible then
+		for _, o in ipairs(allPanels) do
+			if o ~= pHit then o.Visible = false end
+		end
+	end
+end)
+
+refreshAll()
