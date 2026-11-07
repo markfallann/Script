@@ -1,1894 +1,324 @@
--- ScriptQuu | Visual (Full Fix) | LocalScript -> StarterPlayerScripts
--- Buka menu: klik logo SQ (bisa di-drag) / RightShift
-
+-- ScriptQuu (LocalScript)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local SoundService = game:GetService("SoundService")
+local Workspace = game:GetService("Workspace")
 
 local lp = Players.LocalPlayer
-local STUD_TO_M = 0.28
+local cam = Workspace.CurrentCamera
+local FILE = "ScriptQuu.json"
+local SOUND_RANGE = 45
 
----------------------------------------------------------------- CONFIG
-local E = {
-	On = false,
-	Color = Color3.fromRGB(255, 60, 60),
-	TeamColor = true,
-	WallCheck = true,
-	Body = true,
-	Fill = true,
-	Name = true,
-	Display = true,
-	Dist = true,
-	Unit = "Meter",
-	Part = false,
-	Parts = { Full = true, Head = false, Torso = false, Arms = false, Legs = false },
-	Tracer = false,
-	Origin = "Bawah",
-	Thick = 2,
-	TracerWall = true,
-}
-
-local GROUPS = {
-	Head = { "Head" },
-	Torso = { "Torso", "UpperTorso", "LowerTorso" },
-	Arms = { "Left Arm", "Right Arm", "LeftUpperArm", "LeftLowerArm", "LeftHand", "RightUpperArm", "RightLowerArm", "RightHand" },
-	Legs = { "Left Leg", "Right Leg", "LeftUpperLeg", "LeftLowerLeg", "LeftFoot", "RightUpperLeg", "RightLowerLeg", "RightFoot" },
-}
-
-local function wanted(partName)
-	if E.Parts.Full then
-		return partName ~= "HumanoidRootPart"
-	end
-	for group, on in E.Parts do
-		if on and group ~= "Full" and table.find(GROUPS[group], partName) then
-			return true
-		end
-	end
-	return false
-end
-
----------------------------------------------------------------- ESP CORE
-local cache = {}
-local rayParams = RaycastParams.new()
-rayParams.FilterType = Enum.RaycastFilterType.Exclude
-
-local function isVisible(char, target, cam)
-	local filter = { char }
-	if lp.Character then table.insert(filter, lp.Character) end
-	rayParams.FilterDescendantsInstances = filter
-	local origin = cam.CFrame.Position
-	return workspace:Raycast(origin, target.Position - origin, rayParams) == nil
-end
-
-local function drop(p)
-	local c = cache[p]
-	if not c then return end
-	if c.sel then c.sel:Destroy() end
-	if c.tag then c.tag:Destroy() end
-	if c.line then c.line:Destroy() end
-	if c.boxes then
-		for _, b in c.boxes do b:Destroy() end
-	end
-	cache[p] = nil
-end
-
-local tracerGui = Instance.new("ScreenGui")
-tracerGui.Name = "SQ_Tracer"
-tracerGui.ResetOnSpawn = false
-tracerGui.IgnoreGuiInset = true
-tracerGui.Parent = lp:WaitForChild("PlayerGui")
-
-local function mkLabel(parent, y)
-	local l = Instance.new("TextLabel")
-	l.Size = UDim2.new(1, 0, 0, 18)
-	l.Position = UDim2.fromOffset(0, y)
-	l.BackgroundTransparency = 1
-	l.Font = Enum.Font.GothamBold
-	l.TextSize = 14
-	l.TextStrokeTransparency = 0.3
-	l.Text = ""
-	l.Parent = parent
-	return l
-end
-
-local function update(p, cam)
-	local char = p.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	local head = char and char:FindFirstChild("Head")
-
-	if not E.On or not hum or hum.Health <= 0 or not root or not head then
-		drop(p)
-		return
-	end
-
-	local c = cache[p]
-	if c and c.char ~= char then
-		drop(p)
-		c = nil
-	end
-	if not c then
-		c = { char = char, boxes = {} }
-		cache[p] = c
-	end
-
-	local vis
-	local function visible(check)
-		if not check then return true end
-		if vis == nil then
-			vis = isVisible(char, root, cam) or isVisible(char, head, cam)
-		end
-		return vis
-	end
-
-	local col = (E.TeamColor and p.Team) and p.Team.TeamColor.Color or E.Color
-	local show = visible(E.WallCheck)
-
-	-- BADAN (satu kotak utuh)
-	if E.Body then
-		if not c.sel or not c.sel.Parent then
-			local s = Instance.new("SelectionBox")
-			s.Name = "SQ_Body"
-			s.Adornee = char
-			s.LineThickness = 0.04
-			s.Parent = char
-			c.sel = s
-		end
-		c.sel.Color3 = col
-		c.sel.SurfaceColor3 = col
-		c.sel.SurfaceTransparency = E.Fill and 0.8 or 1
-		c.sel.Visible = show
-	elseif c.sel then
-		c.sel:Destroy()
-		c.sel = nil
-	end
-
-	-- PART
-	for part, box in c.boxes do
-		if not part.Parent or not E.Part or not wanted(part.Name) then
-			box:Destroy()
-			c.boxes[part] = nil
-		end
-	end
-	if E.Part then
-		for _, part in char:GetChildren() do
-			if part:IsA("BasePart") and wanted(part.Name) and not c.boxes[part] then
-				local box = Instance.new("BoxHandleAdornment")
-				box.Name = "SQ_Part"
-				box.Adornee = part
-				box.Size = part.Size
-				box.Transparency = 0.45
-				box.ZIndex = 1
-				box.AlwaysOnTop = true
-				box.Parent = part
-				c.boxes[part] = box
-			end
-		end
-		for _, box in c.boxes do
-			box.Color3 = col
-			box.Visible = show
-		end
-	end
-
-	-- NAMA + JARAK
-	if E.Name or E.Dist then
-		if not c.tag or not c.tag.Parent then
-			local tag = Instance.new("BillboardGui")
-			tag.Name = "SQ_Tag"
-			tag.Size = UDim2.fromOffset(160, 36)
-			tag.StudsOffset = Vector3.new(0, 3, 0)
-			tag.AlwaysOnTop = true
-			tag.Adornee = head
-			c.nameL = mkLabel(tag, 0)
-			c.distL = mkLabel(tag, 18)
-			tag.Parent = head
-			c.tag = tag
-		end
-		c.nameL.Visible = E.Name and show
-		if E.Name then
-			c.nameL.Text = E.Display and p.DisplayName or p.Name
-			c.nameL.TextColor3 = col
-		end
-		c.distL.Position = UDim2.fromOffset(0, E.Name and 18 or 9)
-		c.distL.Visible = E.Dist and show
-		if E.Dist then
-			local lroot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
-			local from = lroot and lroot.Position or cam.CFrame.Position
-			local studs = (root.Position - from).Magnitude
-			if E.Unit == "Meter" then
-				c.distL.Text = math.floor(studs * STUD_TO_M) .. "m"
-			else
-				c.distL.Text = math.floor(studs) .. " stud"
-			end
-			c.distL.TextColor3 = col
-		end
-	elseif c.tag then
-		c.tag:Destroy()
-		c.tag, c.nameL, c.distL = nil, nil, nil
-	end
-
-	-- TRACER (kabel penunjuk lokasi)
-	if E.Tracer then
-		if not c.line then
-			local line = Instance.new("Frame")
-			line.Name = "SQ_Line"
-			line.AnchorPoint = Vector2.new(0.5, 0.5)
-			line.BorderSizePixel = 0
-			line.Parent = tracerGui
-			c.line = line
-		end
-		if visible(E.TracerWall) then
-			local v = cam:WorldToViewportPoint(root.Position)
-			local size = cam.ViewportSize
-			local pt = Vector2.new(v.X, v.Y)
-			if v.Z < 0 then
-				pt = Vector2.new(size.X - pt.X, size.Y - pt.Y)
-			end
-			local oy = E.Origin == "Bawah" and size.Y or (E.Origin == "Tengah" and size.Y / 2 or 0)
-			local o = Vector2.new(size.X / 2, oy)
-			local diff = pt - o
-			c.line.Size = UDim2.fromOffset(math.min(diff.Magnitude, 4000), E.Thick)
-			c.line.Position = UDim2.fromOffset((o.X + pt.X) / 2, (o.Y + pt.Y) / 2)
-			c.line.Rotation = math.deg(math.atan2(diff.Y, diff.X))
-			c.line.BackgroundColor3 = col
-			c.line.Visible = true
-		else
-			c.line.Visible = false
-		end
-	elseif c.line then
-		c.line:Destroy()
-		c.line = nil
-	end
-end
-
-RunService.RenderStepped:Connect(function()
-	local cam = workspace.CurrentCamera
-	for _, p in Players:GetPlayers() do
-		if p ~= lp then
-			update(p, cam)
+-- SETTINGS (tersimpan permanen)
+local cfg = {esp=false, name=false, dist=false, full=false, hitbox=false, walls=false, tracker=false, sound=false}
+pcall(function()
+	if readfile and isfile and isfile(FILE) then
+		local d = HttpService:JSONDecode(readfile(FILE))
+		for k, v in pairs(d) do
+			if cfg[k] ~= nil then cfg[k] = v end
 		end
 	end
 end)
-Players.PlayerRemoving:Connect(drop)
-
----------------------------------------------------------------- UI HELPERS
-local ON, OFF = Color3.fromRGB(46, 160, 90), Color3.fromRGB(58, 58, 74)
-local BG, PANEL = Color3.fromRGB(22, 22, 30), Color3.fromRGB(32, 32, 44)
-local W = Color3.new(1, 1, 1)
-
-local order = 0
-local function nextOrder()
-	order += 1
-	return order
+local function save()
+	pcall(function()
+		if writefile then writefile(FILE, HttpService:JSONEncode(cfg)) end
+	end)
 end
+
+-- UI HELPERS
+local BG, ROW = Color3.fromRGB(12, 12, 12), Color3.fromRGB(24, 24, 24)
+local TXT, DIM, LINE = Color3.fromRGB(235, 235, 235), Color3.fromRGB(120, 120, 120), Color3.fromRGB(45, 45, 45)
 
 local function new(class, props, parent)
-	local o = Instance.new(class)
-	for k, v in props do o[k] = v end
-	o.Parent = parent
-	return o
+	local i = Instance.new(class)
+	for k, v in pairs(props) do i[k] = v end
+	i.Parent = parent
+	return i
 end
+local function round(i, r) new("UICorner", {CornerRadius = UDim.new(0, r or 6)}, i) end
+local function stroke(i) new("UIStroke", {Color = LINE, Thickness = 1}, i) end
 
-local function corner(o, r)
-	new("UICorner", { CornerRadius = UDim.new(0, r or 6) }, o)
-end
+local old = lp:WaitForChild("PlayerGui"):FindFirstChild("ScriptQuu")
+if old then old:Destroy() end
+local gui = new("ScreenGui", {Name = "ScriptQuu", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = 999}, lp.PlayerGui)
 
-local function pad(o, n)
-	new("UIPadding", {
-		PaddingTop = UDim.new(0, n), PaddingBottom = UDim.new(0, n),
-		PaddingLeft = UDim.new(0, n), PaddingRight = UDim.new(0, n),
-	}, o)
-end
-
-local function list(o, gap)
-	new("UIListLayout", { Padding = UDim.new(0, gap), SortOrder = Enum.SortOrder.LayoutOrder }, o)
-end
-
-local function mkToggle(parent, size, label, init, cb, pos)
-	local on = init
-	local b = new("TextButton", {
-		Size = size, Position = pos or UDim2.new(), LayoutOrder = nextOrder(), AutoButtonColor = false,
-		Text = "", TextColor3 = W, Font = Enum.Font.GothamMedium, TextSize = 14, BackgroundColor3 = OFF,
-	}, parent)
-	corner(b)
-	local function render()
-		b.BackgroundColor3 = on and ON or OFF
-		b.Text = label .. " : " .. (on and "On" or "Off")
-	end
-	render()
-	b.MouseButton1Click:Connect(function()
-		on = not on
-		render()
-		cb(on)
-	end)
-	return b, function(v) on = v; render() end
-end
-
-local function mkCycle(parent, size, label, opts, init, cb)
-	local idx = table.find(opts, init) or 1
-	local b = new("TextButton", {
-		Size = size, LayoutOrder = nextOrder(), AutoButtonColor = false, BackgroundColor3 = OFF,
-		TextColor3 = W, Font = Enum.Font.GothamMedium, TextSize = 14,
-		Text = label .. " : " .. tostring(opts[idx]),
-	}, parent)
-	corner(b)
-	b.MouseButton1Click:Connect(function()
-		idx = idx % #opts + 1
-		b.Text = label .. " : " .. tostring(opts[idx])
-		cb(opts[idx])
-	end)
-end
-
-local function draggable(handle, target, onClick)
-	local dragging, startMouse, startPos, moved = false, nil, nil, 0
-	handle.InputBegan:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-			dragging, moved = true, 0
-			startMouse, startPos = i.Position, target.Position
-			i.Changed:Connect(function()
-				if i.UserInputState == Enum.UserInputState.End then
-					if dragging and onClick and moved < 6 then onClick() end
-					dragging = false
-				end
-			end)
-		end
-	end)
-	UIS.InputChanged:Connect(function(i)
-		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
-			local d = i.Position - startMouse
-			moved = math.max(moved, d.Magnitude)
-			target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
-		end
-	end)
-end
-
----------------------------------------------------------------- UI ROOT
-local gui = new("ScreenGui", { Name = "ScriptQuu", ResetOnSpawn = false }, lp:WaitForChild("PlayerGui"))
-
-local menu = new("Frame", {
-	Size = UDim2.fromOffset(270, 96), Position = UDim2.new(1, -286, 0, 64),
-	BackgroundColor3 = BG, Active = true, Visible = false,
+-- TOAST 5 DETIK
+local toast = new("TextLabel", {
+	AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 20), Size = UDim2.new(0, 190, 0, 34),
+	BackgroundColor3 = BG, Text = "ScriptQuu terpasang", TextColor3 = TXT, Font = Enum.Font.GothamMedium, TextSize = 14,
 }, gui)
-corner(menu, 10)
+round(toast, 8) stroke(toast)
+task.delay(5, function() toast:Destroy() end)
 
-local titleBar = new("Frame", { Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = Color3.fromRGB(38, 38, 52) }, menu)
-corner(titleBar, 10)
-local titleText = new("TextLabel", {
-	Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "ScriptQuu",
-	TextColor3 = W, Font = Enum.Font.GothamBold, TextSize = 15,
-}, titleBar)
-local back = new("TextButton", {
-	Size = UDim2.fromOffset(34, 34), BackgroundTransparency = 1, Text = "‹", TextColor3 = W,
-	Font = Enum.Font.GothamBold, TextSize = 24, Visible = false,
-}, titleBar)
-draggable(titleBar, menu)
+-- HOLDER + TOMBOL SQ (draggable)
+local holder = new("Frame", {AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -12, 0, 50), Size = UDim2.new(0, 44, 0, 44), BackgroundTransparency = 1}, gui)
+local sq = new("TextButton", {
+	Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = Color3.fromRGB(0, 0, 0), Text = "SQ", TextColor3 = TXT,
+	Font = Enum.Font.GothamBold, TextSize = 15, AutoButtonColor = false,
+}, holder)
+round(sq, 9) stroke(sq)
 
-local pages = new("Frame", {
-	Position = UDim2.fromOffset(0, 40), Size = UDim2.new(1, 0, 1, -40), BackgroundTransparency = 1,
-}, menu)
+local dragging, moved, startPos, startHolder = false, false, nil, nil
+sq.InputBegan:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+		dragging, moved, startPos, startHolder = true, false, i.Position, holder.Position
+	end
+end)
+UIS.InputChanged:Connect(function(i)
+	if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+		local d = i.Position - startPos
+		if d.Magnitude > 5 then moved = true end
+		holder.Position = UDim2.new(startHolder.X.Scale, startHolder.X.Offset + d.X, startHolder.Y.Scale, startHolder.Y.Offset + d.Y)
+	end
+end)
+UIS.InputEnded:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
+end)
 
-local home = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1 }, pages)
-pad(home, 8); list(home, 6)
-local visual = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false }, pages)
-pad(visual, 8); list(visual, 6)
+-- MENU
+local menu = new("Frame", {AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 1, 8), Size = UDim2.new(0, 230, 0, 250), BackgroundColor3 = BG, Visible = false, Active = true}, holder)
+round(menu, 8) stroke(menu)
+sq.Activated:Connect(function()
+	if not moved then menu.Visible = not menu.Visible end
+end)
 
----------------------------------------------------------------- PANEL PENGATURAN ESP
-local panel = new("ScrollingFrame", {
-	Size = UDim2.fromOffset(226, 320), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(0, -8, 0, 0),
-	BackgroundColor3 = PANEL, BorderSizePixel = 0, Visible = false, ScrollBarThickness = 4,
-	CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
-}, menu)
-corner(panel, 10); pad(panel, 8); list(panel, 6)
+local tabBar = new("Frame", {Position = UDim2.new(0, 6, 0, 6), Size = UDim2.new(1, -12, 0, 30), BackgroundTransparency = 1}, menu)
+new("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6)}, tabBar)
 
-local ROW = UDim2.new(1, -8, 0, 30)
-
-local function section(text)
-	new("TextLabel", {
-		Size = UDim2.new(1, -8, 0, 22), BackgroundTransparency = 1, Text = text, TextColor3 = W,
-		Font = Enum.Font.GothamBold, TextSize = 14, LayoutOrder = nextOrder(),
-	}, panel)
+local pages, tabBtns = {}, {}
+local function makePage()
+	local s = new("ScrollingFrame", {
+		Position = UDim2.new(0, 6, 0, 42), Size = UDim2.new(1, -12, 1, -48), BackgroundTransparency = 1, BorderSizePixel = 0,
+		ScrollBarThickness = 3, AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(), Visible = false,
+	}, menu)
+	new("UIListLayout", {Padding = UDim.new(0, 6)}, s)
+	return s
 end
-
-local function tg(label, tbl, key)
-	local _, set = mkToggle(panel, ROW, label, tbl[key], function(v) tbl[key] = v end)
-	return set
-end
-
-local palette = {
-	Color3.fromRGB(255, 60, 60), Color3.fromRGB(255, 150, 40), Color3.fromRGB(255, 230, 60), Color3.fromRGB(70, 220, 90),
-	Color3.fromRGB(60, 220, 220), Color3.fromRGB(70, 120, 255), Color3.fromRGB(180, 80, 255), Color3.fromRGB(255, 255, 255),
-}
-
--- Warna
-section("Warna")
-local teamSet
-local grid = new("Frame", { Size = UDim2.new(1, -8, 0, 60), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, panel)
-new("UIGridLayout", { CellSize = UDim2.fromOffset(40, 26), CellPadding = UDim2.fromOffset(8, 8) }, grid)
-for _, col in palette do
-	local sw = new("TextButton", { BackgroundColor3 = col, Text = "", AutoButtonColor = false }, grid)
-	corner(sw)
-	sw.MouseButton1Click:Connect(function()
-		E.Color = col
-		E.TeamColor = false
-		if teamSet then teamSet(false) end
-	end)
-end
-teamSet = tg("Esp Team", E, "TeamColor")
-tg("Cek Tembok", E, "WallCheck")
-
--- Tampilan
-section("Tampilan")
-tg("Esp Badan", E, "Body")
-tg("Isi Badan", E, "Fill")
-tg("Esp Nama", E, "Name")
-tg("Display Name", E, "Display")
-tg("Esp Jarak", E, "Dist")
-mkCycle(panel, ROW, "Satuan", { "Meter", "Stud" }, E.Unit, function(v) E.Unit = v end)
-
--- Part
-section("Esp Part")
-tg("Esp Part", E, "Part")
-local partSet = {}
-for _, it in { { "Full", "Full Body" }, { "Head", "Head" }, { "Torso", "Torso" }, { "Arms", "Arms" }, { "Legs", "Legs" } } do
-	local key = it[1]
-	local _, set = mkToggle(panel, ROW, it[2], E.Parts[key], function(v)
-		E.Parts[key] = v
-		if v and key == "Full" then
-			for k in E.Parts do
-				if k ~= "Full" then
-					E.Parts[k] = false
-					partSet[k](false)
-				end
-			end
-		elseif v then
-			E.Parts.Full = false
-			partSet.Full(false)
-		end
-	end)
-	partSet[key] = set
-end
-
--- Tracer
-section("Esp Tracer")
-tg("Esp Tracer", E, "Tracer")
-mkCycle(panel, ROW, "Dari", { "Bawah", "Tengah", "Atas" }, E.Origin, function(v) E.Origin = v end)
-mkCycle(panel, ROW, "Tebal", { 1, 2, 3, 4 }, E.Thick, function(v) E.Thick = v end)
-tg("Tracer Tembok", E, "TracerWall")
-
----------------------------------------------------------------- PAGES
 local function showPage(name)
-	panel.Visible = false
-	home.Visible = name == "Home"
-	visual.Visible = name == "Visual"
-	back.Visible = name ~= "Home"
-	titleText.Text = name == "Home" and "ScriptQuu" or ("ScriptQuu  •  " .. name)
-end
-
-local goVisual = new("TextButton", {
-	Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = OFF, Text = "Visual", TextColor3 = W,
-	Font = Enum.Font.GothamBold, TextSize = 15, AutoButtonColor = false, LayoutOrder = nextOrder(),
-}, home)
-corner(goVisual)
-goVisual.MouseButton1Click:Connect(function() showPage("Visual") end)
-back.MouseButton1Click:Connect(function() showPage("Home") end)
-
-local row = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, visual)
-mkToggle(row, UDim2.new(1, -38, 1, 0), "Esp", E.On, function(v) E.On = v end)
-local gear = new("TextButton", {
-	Size = UDim2.fromOffset(34, 32), Position = UDim2.new(1, -34, 0, 0), BackgroundColor3 = OFF,
-	Text = "⚙️", TextSize = 16, AutoButtonColor = false,
-}, row)
-corner(gear)
-gear.MouseButton1Click:Connect(function()
-	panel.Visible = not panel.Visible
-end)
-
----------------------------------------------------------------- LOGO SQ (kotak, sudut tumpul, hitam)
-local logo = new("TextButton", {
-	Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, -60, 0, 12),
-	BackgroundColor3 = Color3.new(0, 0, 0), BorderSizePixel = 0,
-	Text = "SQ", TextColor3 = W, Font = Enum.Font.GothamBlack, TextSize = 17,
-	AutoButtonColor = false, ZIndex = 10,
-}, gui)
-corner(logo, 10)
-new("UIStroke", { Color = Color3.fromRGB(70, 70, 80), Thickness = 1.5, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, logo)
-
-local function toggleMenu()
-	menu.Visible = not menu.Visible
-	if menu.Visible then showPage("Home") end
-end
-
-draggable(logo, logo, toggleMenu)
-
-UIS.InputBegan:Connect(function(i, gp)
-	if not gp and i.KeyCode == Enum.KeyCode.RightShift then
-		toggleMenu()
-	end
-end)
----------------------------------------------------------------- XIT PAGE (movement)
-local X = {
-	Fling = false,
-	FlingRange = 10,
-	FlingPower = 9000,
-	AntiFall = true,
-	Fly = false,
-	FlySpeed = 60,
-	Noclip = false,
-}
-
-local xit = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false }, pages)
-pad(xit, 8); list(xit, 6)
-
-local goXit = new("TextButton", {
-	Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = OFF, Text = "Xit", TextColor3 = W,
-	Font = Enum.Font.GothamBold, TextSize = 15, AutoButtonColor = false, LayoutOrder = nextOrder(),
-}, home)
-corner(goXit)
-goXit.MouseButton1Click:Connect(function() showPage("Xit") end)
-
--- panel pengaturan Fly (speed)
-local flyPanel = new("Frame", {
-	Size = UDim2.fromOffset(226, 0), AutomaticSize = Enum.AutomaticSize.Y, AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(0, -8, 0, 0), BackgroundColor3 = PANEL, Visible = false,
-}, menu)
-corner(flyPanel, 10); pad(flyPanel, 8); list(flyPanel, 6)
-new("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1, Text = "Setting Fly", TextColor3 = W,
-	Font = Enum.Font.GothamBold, TextSize = 14, LayoutOrder = nextOrder(),
-}, flyPanel)
-mkCycle(flyPanel, UDim2.new(1, 0, 0, 30), "Speed", { 30, 60, 100, 150, 250 }, X.FlySpeed, function(v) X.FlySpeed = v end)
-
-local oldShowPage = showPage
-showPage = function(name)
-	oldShowPage(name)
-	xit.Visible = name == "Xit"
-	flyPanel.Visible = false
-end
-
-local function xitRow(parent, label, init, cb, withGear, gearCb)
-	local row = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, parent)
-	mkToggle(row, withGear and UDim2.new(1, -38, 1, 0) or UDim2.new(1, 0, 1, 0), label, init, cb)
-	if withGear then
-		local g = new("TextButton", {
-			Size = UDim2.fromOffset(34, 32), Position = UDim2.new(1, -34, 0, 0), BackgroundColor3 = OFF,
-			Text = "⚙️", TextSize = 16, AutoButtonColor = false,
-		}, row)
-		corner(g)
-		g.MouseButton1Click:Connect(gearCb)
+	for n, p in pairs(pages) do p.Visible = (n == name) end
+	for n, b in pairs(tabBtns) do
+		b.BackgroundColor3 = (n == name) and Color3.fromRGB(40, 40, 40) or ROW
+		b.TextColor3 = (n == name) and TXT or DIM
 	end
 end
-
-xitRow(xit, "WalkFling", X.Fling, function(v) X.Fling = v end)
-xitRow(xit, "Anti Fall Damage", X.AntiFall, function(v) X.AntiFall = v end)
-xitRow(xit, "Fly", X.Fly, function(v) X.Fly = v end, true, function()
-	panel.Visible = false
-	flyPanel.Visible = not flyPanel.Visible
-end)
-xitRow(xit, "Noclip", X.Noclip, function(v) X.Noclip = v end)
-
----------------------------------------------------------------- WALKFLING
-RunService.Stepped:Connect(function()
-	if not X.Fling then return end
-	local char = lp.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if not root or not hum then return end
-
-	for _, p in Players:GetPlayers() do
-		if p ~= lp then
-			local oc = p.Character
-			local oroot = oc and oc:FindFirstChild("HumanoidRootPart")
-			local ohum = oc and oc:FindFirstChildOfClass("Humanoid")
-			if oroot and ohum and ohum.Health > 0 then
-				local dist = (oroot.Position - root.Position).Magnitude
-				if dist <= X.FlingRange then
-					local dir = (oroot.Position - root.Position)
-					if dir.Magnitude < 0.1 then dir = Vector3.new(1, 0, 0) end
-					dir = dir.Unit
-					oroot.AssemblyLinearVelocity = dir * X.FlingPower + Vector3.new(0, X.FlingPower * 0.6, 0)
-				end
-			end
-		end
-	end
-end)
-
----------------------------------------------------------------- ANTI FALL DAMAGE
-local function hookFallDamage()
-	local char = lp.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if hum then
-		hum:SetStateEnabled(Enum.HumanoidStateType.Landed, not X.AntiFall)
-	end
+for _, name in ipairs({"Visual", "Xit"}) do
+	pages[name] = makePage()
+	local b = new("TextButton", {Size = UDim2.new(0.5, -3, 1, 0), BackgroundColor3 = ROW, Text = name, Font = Enum.Font.GothamMedium, TextSize = 13, TextColor3 = DIM, AutoButtonColor = false}, tabBar)
+	round(b, 6)
+	tabBtns[name] = b
+	b.Activated:Connect(function() showPage(name) end)
 end
-RunService.Heartbeat:Connect(hookFallDamage)
-lp.CharacterAdded:Connect(function()
-	task.wait(0.5)
-	hookFallDamage()
-end)
-
----------------------------------------------------------------- FLY
-local flyConn
-local function startFly()
-	local char = lp.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if not root or not hum then return end
-	hum.PlatformStand = true
-	local bv = Instance.new("BodyVelocity")
-	bv.Name = "SQ_Fly"
-	bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-	bv.Velocity = Vector3.new()
-	bv.Parent = root
-	flyConn = RunService.RenderStepped:Connect(function()
-		if not X.Fly then return end
-		local c2 = workspace.CurrentCamera
-		local move = Vector3.new()
-		if UIS:IsKeyDown(Enum.KeyCode.W) then move += c2.CFrame.LookVector end
-		if UIS:IsKeyDown(Enum.KeyCode.S) then move -= c2.CFrame.LookVector end
-		if UIS:IsKeyDown(Enum.KeyCode.A) then move -= c2.CFrame.RightVector end
-		if UIS:IsKeyDown(Enum.KeyCode.D) then move += c2.CFrame.RightVector end
-		if UIS:IsKeyDown(Enum.KeyCode.Space) then move += Vector3.new(0, 1, 0) end
-		if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then move -= Vector3.new(0, 1, 0) end
-		if move.Magnitude > 0 then move = move.Unit end
-		bv.Velocity = move * X.FlySpeed
-	end)
-end
-local function stopFly()
-	if flyConn then flyConn:Disconnect(); flyConn = nil end
-	local char = lp.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if root then
-		local bv = root:FindFirstChild("SQ_Fly")
-		if bv then bv:Destroy() end
-	end
-	if hum then hum.PlatformStand = false end
-end
-local lastFly = X.Fly
-RunService.RenderStepped:Connect(function()
-	if X.Fly ~= lastFly then
-		lastFly = X.Fly
-		if X.Fly then startFly() else stopFly() end
-	end
-end)
-lp.CharacterAdded:Connect(function()
-	if X.Fly then
-		task.wait(0.5)
-		startFly()
-	end
-end)
-
----------------------------------------------------------------- NOCLIP
-RunService.Stepped:Connect(function()
-	local char = lp.Character
-	if not char then return end
-	for _, part in char:GetDescendants() do
-		if part:IsA("BasePart") then
-			part.CanCollide = not X.Noclip
-		end
-	end
-end)
-
----------------------------------------------------------------- ZOOM (UI terpisah, draggable, sangat kecil)
-local zoomGui = Instance.new("ScreenGui")
-zoomGui.Name = "SQ_Zoom"
-zoomGui.ResetOnSpawn = false
-zoomGui.Parent = lp.PlayerGui
-
-local zoomBtn = new("TextButton", {
-	Size = UDim2.fromOffset(28, 28), Position = UDim2.new(1, -110, 0, 12),
-	BackgroundColor3 = Color3.new(0, 0, 0), BorderSizePixel = 0,
-	Text = "Z", TextColor3 = W, Font = Enum.Font.GothamBold, TextSize = 13,
-	AutoButtonColor = false, ZIndex = 10,
-}, zoomGui)
-corner(zoomBtn, 7)
-new("UIStroke", { Color = Color3.fromRGB(70, 70, 80), Thickness = 1.2 }, zoomBtn)
-
-local zoomed = false
-local savedFov = workspace.CurrentCamera.FieldOfView
-draggable(zoomBtn, zoomBtn, function()
-	local cam2 = workspace.CurrentCamera
-	zoomed = not zoomed
-	if zoomed then
-		savedFov = cam2.FieldOfView
-		cam2.FieldOfView = 30
-	else
-		cam2.FieldOfView = savedFov
-	end
-end)
----------------------------------------------------------------- CONFIG TAMBAHAN
-local T = {
-	Fullbright = false,
-	NoFog = false,
-	Aim = false,
-	AimPart = "Head",
-}
-local savedLighting = {}
-local savedFog = {}
-
----------------------------------------------------------------- TELEPORT (klik tempat)
-local TP = { ClickMode = false }
-
-local tpConn
-local function enableClickTeleport()
-	tpConn = UIS.InputBegan:Connect(function(i, gp)
-		if gp or not TP.ClickMode then return end
-		if i.UserInputType == Enum.UserInputType.MouseButton1 then
-			local mouse = lp:GetMouse()
-			local target, pos = mouse.Target, mouse.Hit
-			if pos then
-				local char = lp.Character
-				local root = char and char:FindFirstChild("HumanoidRootPart")
-				if root then
-					root.CFrame = CFrame.new(pos.Position + Vector3.new(0, 3, 0))
-				end
-			end
-		end
-	end)
-end
-local function disableClickTeleport()
-	if tpConn then tpConn:Disconnect(); tpConn = nil end
-end
-
----------------------------------------------------------------- TELEPORT (ke player)
-local function teleportToPlayer(targetName)
-	local char = lp.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	if not root then return end
-	local target
-	for _, p in Players:GetPlayers() do
-		if p ~= lp and (p.Name:lower() == targetName:lower() or p.DisplayName:lower() == targetName:lower()) then
-			target = p
-			break
-		end
-	end
-	if not target then return end
-	local tc = target.Character
-	local troot = tc and tc:FindFirstChild("HumanoidRootPart")
-	if troot then
-		root.CFrame = troot.CFrame + Vector3.new(0, 0, 3)
-	end
-end
-
----------------------------------------------------------------- FULLBRIGHT + NO FOG
-local Lighting = game:GetService("Lighting")
-
-local function applyFullbright(on)
-	if on then
-		savedLighting = {
-			Brightness = Lighting.Brightness, ClockTime = Lighting.ClockTime,
-			Ambient = Lighting.Ambient, OutdoorAmbient = Lighting.OutdoorAmbient,
-			GlobalShadows = Lighting.GlobalShadows,
-		}
-		Lighting.Brightness = 2
-		Lighting.ClockTime = 14
-		Lighting.Ambient = Color3.new(1, 1, 1)
-		Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
-		Lighting.GlobalShadows = false
-	else
-		if savedLighting.Brightness then
-			Lighting.Brightness = savedLighting.Brightness
-			Lighting.ClockTime = savedLighting.ClockTime
-			Lighting.Ambient = savedLighting.Ambient
-			Lighting.OutdoorAmbient = savedLighting.OutdoorAmbient
-			Lighting.GlobalShadows = savedLighting.GlobalShadows
-		end
-	end
-end
-
-local function applyNoFog(on)
-	if on then
-		savedFog = { FogEnd = Lighting.FogEnd, FogStart = Lighting.FogStart }
-		Lighting.FogEnd = 1e9
-		Lighting.FogStart = 0
-	else
-		if savedFog.FogEnd then
-			Lighting.FogEnd = savedFog.FogEnd
-			Lighting.FogStart = savedFog.FogStart
-		end
-	end
-end
-
----------------------------------------------------------------- AUTO AIM
-local AIM_PARTS = { "Head", "UpperTorso", "Torso", "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg" }
-
-local function closestTarget()
-	local char = lp.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	if not root then return nil end
-	local cam2 = workspace.CurrentCamera
-	local best, bestDist
-	for _, p in Players:GetPlayers() do
-		if p ~= lp then
-			local oc = p.Character
-			local ohum = oc and oc:FindFirstChildOfClass("Humanoid")
-			local opart = oc and oc:FindFirstChild(T.AimPart)
-			if ohum and ohum.Health > 0 and opart then
-				local v = cam2:WorldToViewportPoint(opart.Position)
-				if v.Z > 0 then
-					local screen = Vector2.new(v.X, v.Y)
-					local center = Vector2.new(cam2.ViewportSize.X / 2, cam2.ViewportSize.Y / 2)
-					local d = (screen - center).Magnitude
-					if not bestDist or d < bestDist then
-						bestDist, best = d, opart
-					end
-				end
-			end
-		end
-	end
-	return best
-end
-
-RunService.RenderStepped:Connect(function()
-	if not T.Aim then return end
-	local part = closestTarget()
-	if part then
-		local char = lp.Character
-		local root = char and char:FindFirstChild("HumanoidRootPart")
-		if root then
-			workspace.CurrentCamera.CFrame = CFrame.new(workspace.CurrentCamera.CFrame.Position, part.Position)
-		end
-	end
-end)
-
----------------------------------------------------------------- UI: TELEPORT ROW
-xitRow(xit, "Teleport Klik", TP.ClickMode, function(v)
-	TP.ClickMode = v
-	if v then enableClickTeleport() else disableClickTeleport() end
-end)
-
-do
-	local row = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, xit)
-	local box = new("TextBox", {
-		Size = UDim2.new(1, -74, 1, 0), BackgroundColor3 = OFF, Text = "", PlaceholderText = "Username",
-		TextColor3 = W, PlaceholderColor3 = Color3.fromRGB(170, 170, 180), Font = Enum.Font.Gotham, TextSize = 14,
-		ClearTextOnFocus = false,
-	}, row)
-	corner(box)
-	new("UIPadding", { PaddingLeft = UDim.new(0, 8) }, box)
-	local go = new("TextButton", {
-		Size = UDim2.fromOffset(66, 32), Position = UDim2.new(1, -66, 0, 0), BackgroundColor3 = ON,
-		Text = "TP", TextColor3 = W, Font = Enum.Font.GothamBold, TextSize = 14, AutoButtonColor = false,
-	}, row)
-	corner(go)
-	go.MouseButton1Click:Connect(function()
-		if box.Text ~= "" then teleportToPlayer(box.Text) end
-	end)
-end
-
----------------------------------------------------------------- UI: FULLBRIGHT, NO FOG, AUTO AIM
-xitRow(xit, "Fullbright", T.Fullbright, function(v)
-	T.Fullbright = v
-	applyFullbright(v)
-end)
-xitRow(xit, "No Fog", T.NoFog, function(v)
-	T.NoFog = v
-	applyNoFog(v)
-end)
-
-local aimPanel = new("Frame", {
-	Size = UDim2.fromOffset(226, 0), AutomaticSize = Enum.AutomaticSize.Y, AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(0, -8, 0, 0), BackgroundColor3 = PANEL, Visible = false,
-}, menu)
-corner(aimPanel, 10); pad(aimPanel, 8); list(aimPanel, 6)
-new("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1, Text = "Setting Auto Aim", TextColor3 = W,
-	Font = Enum.Font.GothamBold, TextSize = 14, LayoutOrder = nextOrder(),
-}, aimPanel)
-mkCycle(aimPanel, UDim2.new(1, 0, 0, 30), "Target", AIM_PARTS, T.AimPart, function(v) T.AimPart = v end)
-
-local oldShowPage2 = showPage
-showPage = function(name)
-	oldShowPage2(name)
-	aimPanel.Visible = false
-end
-
-xitRow(xit, "Auto Aim", T.Aim, function(v) T.Aim = v end, true, function()
-	panel.Visible = false
-	flyPanel.Visible = false
-	aimPanel.Visible = not aimPanel.Visible
-end)
----------------------------------------------------------------- MENU KETIGA: TOOLS
-local Tools = {
-	Speed = false,
-	SpeedVal = 32,
-	InfJump = false,
-	AntiAfk = true,
-	ChatSpy = false,
-	HitboxOn = false,
-	HitboxSize = 6,
-	SilentAim = false,
-	ItemEsp = false,
-	Radar = false,
-	Freecam = false,
-	Keybinds = {},
-}
-
-local tools = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false }, pages)
-pad(tools, 8); list(tools, 6)
-
-local goTools = new("TextButton", {
-	Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = OFF, Text = "Tools", TextColor3 = W,
-	Font = Enum.Font.GothamBold, TextSize = 15, AutoButtonColor = false, LayoutOrder = nextOrder(),
-}, home)
-corner(goTools)
-goTools.MouseButton1Click:Connect(function() showPage("Tools") end)
-
-local oldShowPage3 = showPage
-showPage = function(name)
-	oldShowPage3(name)
-	tools.Visible = name == "Tools"
-end
-
----------------------------------------------------------------- SPEED HACK
-local speedPanel = new("Frame", {
-	Size = UDim2.fromOffset(226, 0), AutomaticSize = Enum.AutomaticSize.Y, AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(0, -8, 0, 0), BackgroundColor3 = PANEL, Visible = false,
-}, menu)
-corner(speedPanel, 10); pad(speedPanel, 8); list(speedPanel, 6)
-new("TextLabel", { Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1, Text = "Setting Speed",
-	TextColor3 = W, Font = Enum.Font.GothamBold, TextSize = 14, LayoutOrder = nextOrder() }, speedPanel)
-mkCycle(speedPanel, UDim2.new(1, 0, 0, 30), "Speed", { 24, 32, 50, 75, 100 }, Tools.SpeedVal, function(v)
-	Tools.SpeedVal = v
-	local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
-	if hum and Tools.Speed then hum.WalkSpeed = v end
-end)
-
-lp.CharacterAdded:Connect(function(char)
-	local hum = char:WaitForChild("Humanoid")
-	hum.WalkSpeed = Tools.Speed and Tools.SpeedVal or 16
-end)
-
----------------------------------------------------------------- INFINITE JUMP
-local UISJump
-local function enableInfJump()
-	UISJump = UIS.JumpRequest:Connect(function()
-		local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
-		if hum and Tools.InfJump then
-			hum:ChangeState(Enum.HumanoidStateType.Jumping)
-		end
-	end)
-end
-enableInfJump()
-
----------------------------------------------------------------- ANTI AFK
-lp.Idled:Connect(function()
-	if Tools.AntiAfk then
-		local VirtualUser = game:GetService("VirtualUser")
-		VirtualUser:CaptureController()
-		VirtualUser:ClickButton2(Vector2.new())
-	end
-end)
-
----------------------------------------------------------------- CHAT SPY (log semua chat ke console)
-local TextChatService = game:GetService("TextChatService")
-local function hookChat()
-	pcall(function()
-		TextChatService.OnIncomingMessage = function(msg)
-			if Tools.ChatSpy and msg.TextSource then
-				local p = Players:GetPlayerByUserId(msg.TextSource.UserId)
-				print(("[SQ Chat] %s: %s"):format(p and p.Name or "?", msg.Text))
-			end
-			return nil
-		end
-	end)
-end
-hookChat()
-
----------------------------------------------------------------- HITBOX EXPANDER (musuh)
-RunService.Stepped:Connect(function()
-	if not Tools.HitboxOn then return end
-	for _, p in Players:GetPlayers() do
-		if p ~= lp then
-			local oc = p.Character
-			local root = oc and oc:FindFirstChild("HumanoidRootPart")
-			if root then
-				root.Size = Vector3.new(Tools.HitboxSize, Tools.HitboxSize, Tools.HitboxSize)
-			end
-		end
-	end
-end)
-
----------------------------------------------------------------- SILENT AIM
--- Mengembalikan target part terdekat tanpa menggerakkan kamera; sambungkan sendiri ke tool/remote combat game kamu.
-local function getSilentAimTarget()
-	if not Tools.SilentAim then return nil end
-	return closestTarget()
-end
-_G.SQ_GetSilentAimTarget = getSilentAimTarget
-
----------------------------------------------------------------- ITEM ESP (Tool di Workspace)
-local itemCache = {}
-RunService.RenderStepped:Connect(function()
-	if not Tools.ItemEsp then
-		for _, bb in itemCache do bb:Destroy() end
-		table.clear(itemCache)
-		return
-	end
-	for _, obj in workspace:GetDescendants() do
-		if (obj:IsA("Tool") or obj:IsA("MeshPart") and obj.Name:lower():find("coin")) and not obj:IsDescendantOf(lp.Character or Instance.new("Folder")) then
-			local part = obj:IsA("Tool") and obj:FindFirstChildWhichIsA("BasePart") or obj
-			if part and not itemCache[obj] then
-				local bb = Instance.new("BillboardGui")
-				bb.Size = UDim2.fromOffset(120, 18)
-				bb.StudsOffset = Vector3.new(0, 1.5, 0)
-				bb.AlwaysOnTop = true
-				bb.Adornee = part
-				local l = Instance.new("TextLabel")
-				l.Size = UDim2.fromScale(1, 1)
-				l.BackgroundTransparency = 1
-				l.TextColor3 = Color3.fromRGB(255, 230, 60)
-				l.Font = Enum.Font.GothamBold
-				l.TextSize = 13
-				l.Text = obj.Name
-				l.Parent = bb
-				bb.Parent = part
-				itemCache[obj] = bb
-			end
-		end
-	end
-end)
-
----------------------------------------------------------------- RADAR / MINIMAP
-local radarGui = new("ScreenGui", { Name = "SQ_Radar", ResetOnSpawn = false }, lp.PlayerGui)
-local radarFrame = new("Frame", {
-	Size = UDim2.fromOffset(140, 140), Position = UDim2.new(0, 12, 0, 12),
-	BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.3, Visible = false,
-}, radarGui)
-corner(radarFrame, 70)
-new("UIStroke", { Color = Color3.fromRGB(80, 80, 90), Thickness = 1.5 }, radarFrame)
-local dots = {}
-
-RunService.RenderStepped:Connect(function()
-	radarFrame.Visible = Tools.Radar
-	if not Tools.Radar then return end
-	local char = lp.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	if not root then return end
-	local range = 150
-	for _, p in Players:GetPlayers() do
-		if p ~= lp then
-			local oc = p.Character
-			local oroot = oc and oc:FindFirstChild("HumanoidRootPart")
-			if oroot then
-				local rel = oroot.Position - root.Position
-				local flat = Vector2.new(rel.X, rel.Z)
-				if flat.Magnitude <= range then
-					if not dots[p] then
-						local d = new("Frame", { Size = UDim2.fromOffset(6, 6), BackgroundColor3 = Color3.fromRGB(255, 70, 70), AnchorPoint = Vector2.new(0.5, 0.5) }, radarFrame)
-						corner(d, 3)
-						dots[p] = d
-					end
-					local scaled = flat / range * 65
-					dots[p].Position = UDim2.fromOffset(70 + scaled.X, 70 + scaled.Y)
-					dots[p].Visible = true
-				elseif dots[p] then
-					dots[p].Visible = false
-				end
-			end
-		end
-	end
-	for p, d in dots do
-		if not p.Parent then d:Destroy(); dots[p] = nil end
-	end
-end)
-
----------------------------------------------------------------- FREECAM
-local freecamConn
-local savedCamType
-local function startFreecam()
-	local cam2 = workspace.CurrentCamera
-	savedCamType = cam2.CameraType
-	cam2.CameraType = Enum.CameraType.Scriptable
-	freecamConn = RunService.RenderStepped:Connect(function()
-		if not Tools.Freecam then return end
-		local move = Vector3.new()
-		if UIS:IsKeyDown(Enum.KeyCode.W) then move += cam2.CFrame.LookVector end
-		if UIS:IsKeyDown(Enum.KeyCode.S) then move -= cam2.CFrame.LookVector end
-		if UIS:IsKeyDown(Enum.KeyCode.A) then move -= cam2.CFrame.RightVector end
-		if UIS:IsKeyDown(Enum.KeyCode.D) then move += cam2.CFrame.RightVector end
-		if UIS:IsKeyDown(Enum.KeyCode.E) then move += Vector3.new(0, 1, 0) end
-		if UIS:IsKeyDown(Enum.KeyCode.Q) then move -= Vector3.new(0, 1, 0) end
-		if move.Magnitude > 0 then
-			cam2.CFrame = cam2.CFrame + move.Unit * 1.5
-		end
-	end)
-end
-local function stopFreecam()
-	if freecamConn then freecamConn:Disconnect(); freecamConn = nil end
-	workspace.CurrentCamera.CameraType = savedCamType or Enum.CameraType.Custom
-end
-local lastFreecam = Tools.Freecam
-RunService.Heartbeat:Connect(function()
-	if Tools.Freecam ~= lastFreecam then
-		lastFreecam = Tools.Freecam
-		if Tools.Freecam then startFreecam() else stopFreecam() end
-	end
-end)
-
----------------------------------------------------------------- COPY LOKASI
-local function copyMouseLocation()
-	local mouse = lp:GetMouse()
-	local pos = mouse.Hit and mouse.Hit.Position
-	if pos then
-		local txt = ("%.1f, %.1f, %.1f"):format(pos.X, pos.Y, pos.Z)
-		pcall(function() setclipboard(txt) end)
-	end
-end
-
----------------------------------------------------------------- AUTO FARM (klik objek terdekat bernama "Collect"/"Coin")
-local function autoFarmTarget()
-	local char = lp.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	if not root then return nil end
-	local best, bestDist
-	for _, obj in workspace:GetDescendants() do
-		if obj:IsA("BasePart") and (obj.Name:lower():find("coin") or obj.Name:lower():find("collect")) then
-			local d = (obj.Position - root.Position).Magnitude
-			if not bestDist or d < bestDist then bestDist, best = d, obj end
-		end
-	end
-	return best
-end
-RunService.Heartbeat:Connect(function()
-	if not Tools.AutoFarm then return end
-	local char = lp.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	local t = autoFarmTarget()
-	if root and t then
-		root.CFrame = CFrame.new(t.Position)
-	end
-end)
-
----------------------------------------------------------------- UI TOOLS PAGE
-local function toolsRow(label, init, cb, withGear, gearCb)
-	local row = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, tools)
-	mkToggle(row, withGear and UDim2.new(1, -38, 1, 0) or UDim2.new(1, 0, 1, 0), label, init, cb)
-	if withGear then
-		local g = new("TextButton", {
-			Size = UDim2.fromOffset(34, 32), Position = UDim2.new(1, -34, 0, 0), BackgroundColor3 = OFF,
-			Text = "⚙️", TextSize = 16, AutoButtonColor = false,
-		}, row)
-		corner(g)
-		g.MouseButton1Click:Connect(gearCb)
-	end
-end
-
-local function hideExtraPanels()
-	panel.Visible, flyPanel.Visible, aimPanel.Visible, speedPanel.Visible = false, false, false, false
-end
-local oldShowPage4 = showPage
-showPage = function(name)
-	oldShowPage4(name)
-	speedPanel.Visible = false
-end
-
-toolsRow("Speed Hack", Tools.Speed, function(v)
-	Tools.Speed = v
-	local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
-	if hum then hum.WalkSpeed = v and Tools.SpeedVal or 16 end
-end, true, function()
-	hideExtraPanels()
-	speedPanel.Visible = true
-end)
-toolsRow("Infinite Jump", Tools.InfJump, function(v) Tools.InfJump = v end)
-toolsRow("Anti AFK", Tools.AntiAfk, function(v) Tools.AntiAfk = v end)
-toolsRow("Chat Spy", Tools.ChatSpy, function(v) Tools.ChatSpy = v end)
-toolsRow("Hitbox Expander", Tools.HitboxOn, function(v)
-	Tools.HitboxOn = v
-	if not v then
-		for _, p in Players:GetPlayers() do
-			if p ~= lp then
-				local oc = p.Character
-				local root = oc and oc:FindFirstChild("HumanoidRootPart")
-				if root then root.Size = Vector3.new(2, 2, 1) end
-			end
-		end
-	end
-end)
-toolsRow("Silent Aim", Tools.SilentAim, function(v) Tools.SilentAim = v end)
-toolsRow("Item Esp", Tools.ItemEsp, function(v) Tools.ItemEsp = v end)
-toolsRow("Radar", Tools.Radar, function(v) Tools.Radar = v end)
-toolsRow("Freecam", Tools.Freecam, function(v) Tools.Freecam = v end)
-toolsRow("Auto Farm", Tools.AutoFarm, function(v) Tools.AutoFarm = v end)
-
-local copyRow = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, tools)
-local copyBtn = new("TextButton", {
-	Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = OFF, Text = "Copy Lokasi Mouse", TextColor3 = W,
-	Font = Enum.Font.GothamMedium, TextSize = 14, AutoButtonColor = false,
-}, copyRow)
-corner(copyBtn)
-copyBtn.MouseButton1Click:Connect(copyMouseLocation)
----------------------------------------------------------------- SPECTATE PLAYER
-local Spec = { On = false, Target = nil }
-local specConn
-
-local function startSpectate(target)
-	Spec.Target = target
-	local cam2 = workspace.CurrentCamera
-	cam2.CameraType = Enum.CameraType.Scriptable
-	if specConn then specConn:Disconnect() end
-	specConn = RunService.RenderStepped:Connect(function()
-		if not Spec.On or not Spec.Target or not Spec.Target.Parent then
-			return
-		end
-		local oc = Spec.Target.Character
-		local oroot = oc and oc:FindFirstChild("HumanoidRootPart")
-		if oroot then
-			local offset = oroot.CFrame * CFrame.new(0, 2.5, 8)
-			cam2.CFrame = CFrame.new(offset.Position, oroot.Position + Vector3.new(0, 1.5, 0))
-		end
-	end)
-end
-
-local function stopSpectate()
-	Spec.On, Spec.Target = false, nil
-	if specConn then specConn:Disconnect(); specConn = nil end
-	workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
-end
-
----------------------------------------------------------------- CAMERA ZOOM OUT (termasuk game First Person)
-local Zoom = { On = false, Distance = 20 }
-
-local function applyCamZoom()
-	if Zoom.On then
-		pcall(function()
-			lp.CameraMinZoomDistance = Zoom.Distance
-			lp.CameraMaxZoomDistance = Zoom.Distance
-		end)
-		workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
-	else
-		pcall(function()
-			lp.CameraMinZoomDistance = 0.5
-			lp.CameraMaxZoomDistance = 400
-		end)
-	end
-end
-
-lp.CharacterAdded:Connect(function()
-	task.wait(0.3)
-	if Zoom.On then applyCamZoom() end
-end)
-
----------------------------------------------------------------- UI: MENU KEEMPAT "Cam"
-local camPage = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false }, pages)
-pad(camPage, 8); list(camPage, 6)
-
-local goCam = new("TextButton", {
-	Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = OFF, Text = "Cam", TextColor3 = W,
-	Font = Enum.Font.GothamBold, TextSize = 15, AutoButtonColor = false, LayoutOrder = nextOrder(),
-}, home)
-corner(goCam)
-goCam.MouseButton1Click:Connect(function() showPage("Cam") end)
-
-local oldShowPage5 = showPage
-showPage = function(name)
-	oldShowPage5(name)
-	camPage.Visible = name == "Cam"
-	if name ~= "Cam" and Spec.On then
-		stopSpectate()
-	end
-end
-
--- Spectate
-new("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Text = "Spectate Player", TextColor3 = W,
-	Font = Enum.Font.GothamBold, TextSize = 14, LayoutOrder = nextOrder(),
-}, camPage)
-
-local specRow = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, camPage)
-local specBox = new("TextBox", {
-	Size = UDim2.new(1, -74, 1, 0), BackgroundColor3 = OFF, Text = "", PlaceholderText = "Username",
-	TextColor3 = W, PlaceholderColor3 = Color3.fromRGB(170, 170, 180), Font = Enum.Font.Gotham, TextSize = 14,
-	ClearTextOnFocus = false,
-}, specRow)
-corner(specBox)
-new("UIPadding", { PaddingLeft = UDim.new(0, 8) }, specBox)
-local specGo = new("TextButton", {
-	Size = UDim2.fromOffset(66, 32), Position = UDim2.new(1, -66, 0, 0), BackgroundColor3 = ON,
-	Text = "Spec", TextColor3 = W, Font = Enum.Font.GothamBold, TextSize = 14, AutoButtonColor = false,
-}, specRow)
-corner(specGo)
-specGo.MouseButton1Click:Connect(function()
-	if specBox.Text == "" then return end
-	for _, p in Players:GetPlayers() do
-		if p ~= lp and (p.Name:lower() == specBox.Text:lower() or p.DisplayName:lower() == specBox.Text:lower()) then
-			Spec.On = true
-			startSpectate(p)
-			break
-		end
-	end
-end)
-
-local stopSpecBtn = new("TextButton", {
-	Size = UDim2.new(1, 0, 0, 32), BackgroundColor3 = OFF, Text = "Stop Spectate", TextColor3 = W,
-	Font = Enum.Font.GothamMedium, TextSize = 14, AutoButtonColor = false, LayoutOrder = nextOrder(),
-}, camPage)
-corner(stopSpecBtn)
-stopSpecBtn.MouseButton1Click:Connect(stopSpectate)
-
--- Zoom out
-new("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Text = "Camera Zoom Out", TextColor3 = W,
-	Font = Enum.Font.GothamBold, TextSize = 14, LayoutOrder = nextOrder(),
-}, camPage)
-
-local zoomRow = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, camPage)
-mkToggle(zoomRow, UDim2.new(1, 0, 1, 0), "Force Zoom Out", Zoom.On, function(v)
-	Zoom.On = v
-	applyCamZoom()
-end)
-
-mkCycle(camPage, UDim2.new(1, 0, 0, 30), "Jarak", { 10, 20, 35, 50, 80 }, Zoom.Distance, function(v)
-	Zoom.Distance = v
-	if Zoom.On then applyCamZoom() end
-end)
----------------------------------------------------------------- CONFIG SAVE/LOAD
-local HttpService = game:GetService("HttpService")
-local CONFIG_FOLDER = "ScriptQuu"
-local CONFIG_PATH = CONFIG_FOLDER .. "/config_" .. tostring(game.PlaceId) .. ".json"
-
-local function ensureFolder()
-	pcall(function()
-		if not isfolder(CONFIG_FOLDER) then makefolder(CONFIG_FOLDER) end
-	end)
-end
-
-local function saveConfig()
-	ensureFolder()
-	local data = {
-		E = E, X = X, T = T, Tools = Tools, Zoom = Zoom,
-	}
-	pcall(function()
-		writefile(CONFIG_PATH, HttpService:JSONEncode(data))
-	end)
-end
-
-local function loadConfig()
-	ensureFolder()
-	local ok, raw = pcall(function() return readfile(CONFIG_PATH) end)
-	if not ok or not raw then return end
-	local ok2, data = pcall(function() return HttpService:JSONDecode(raw) end)
-	if not ok2 or not data then return end
-	for k, v in data.E or {} do E[k] = v end
-	for k, v in data.X or {} do X[k] = v end
-	for k, v in data.T or {} do T[k] = v end
-	for k, v in data.Tools or {} do Tools[k] = v end
-	for k, v in data.Zoom or {} do Zoom[k] = v end
-end
-
-loadConfig() -- auto-load saat join
-
----------------------------------------------------------------- NOTIFICATION POPUP (pengganti print)
-local notifGui = new("ScreenGui", { Name = "SQ_Notif", ResetOnSpawn = false }, lp.PlayerGui)
-local notifHolder = new("Frame", {
-	Size = UDim2.fromOffset(220, 300), Position = UDim2.new(1, -232, 1, -312),
-	AnchorPoint = Vector2.new(0, 0), BackgroundTransparency = 1,
-}, notifGui)
-new("UIListLayout", { VerticalAlignment = Enum.VerticalAlignment.Bottom, Padding = UDim.new(0, 6) }, notifHolder)
-
-local function notify(text)
-	local n = new("Frame", {
-		Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.15,
-	}, notifHolder)
-	corner(n, 8)
-	new("UIStroke", { Color = Color3.fromRGB(80, 80, 90), Thickness = 1 }, n)
-	new("TextLabel", {
-		Size = UDim2.new(1, -16, 1, 0), Position = UDim2.fromOffset(8, 0), BackgroundTransparency = 1,
-		Text = text, TextColor3 = W, Font = Enum.Font.GothamMedium, TextSize = 13,
-		TextXAlignment = Enum.TextXAlignment.Left,
-	}, n)
-	task.delay(2.5, function()
-		for i = 1, 10 do
-			n.BackgroundTransparency = 0.15 + (i / 10) * 0.85
-			task.wait(0.02)
-		end
-		n:Destroy()
-	end)
-end
-_G.SQ_Notify = notify
-
----------------------------------------------------------------- WATERMARK + FPS/PING
-local wmGui = new("ScreenGui", { Name = "SQ_Watermark", ResetOnSpawn = false }, lp.PlayerGui)
-local wmFrame = new("Frame", {
-	Size = UDim2.fromOffset(190, 24), Position = UDim2.fromOffset(12, 12),
-	BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.2,
-}, wmGui)
-corner(wmFrame, 6)
-local wmText = new("TextLabel", {
-	Size = UDim2.new(1, -10, 1, 0), Position = UDim2.fromOffset(6, 0), BackgroundTransparency = 1,
-	Text = "ScriptQuu | FPS: 0 | Ping: 0ms", TextColor3 = W, Font = Enum.Font.GothamBold, TextSize = 12,
-	TextXAlignment = Enum.TextXAlignment.Left,
-}, wmFrame)
-
-local frames, lastClock = 0, os.clock()
-RunService.RenderStepped:Connect(function()
-	frames += 1
-end)
-task.spawn(function()
-	while true do
-		task.wait(1)
-		local now = os.clock()
-		local fps = math.floor(frames / (now - lastClock))
-		frames, lastClock = 0, now
-		local ping = math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue())
-		wmText.Text = ("ScriptQuu | FPS: %d | Ping: %dms"):format(fps, ping)
-	end
-end)
-
----------------------------------------------------------------- KEYBIND CUSTOM PER FITUR
-local Keybinds = {
-	{ name = "Esp", key = Enum.KeyCode.F1, get = function() return E.On end, set = function(v) E.On = v end },
-	{ name = "WalkFling", key = Enum.KeyCode.F2, get = function() return X.Fling end, set = function(v) X.Fling = v end },
-	{ name = "Fly", key = Enum.KeyCode.F3, get = function() return X.Fly end, set = function(v) X.Fly = v end },
-	{ name = "Noclip", key = Enum.KeyCode.F4, get = function() return X.Noclip end, set = function(v) X.Noclip = v end },
-	{ name = "Speed Hack", key = Enum.KeyCode.F5, get = function() return Tools.Speed end, set = function(v)
-		Tools.Speed = v
-		local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
-		if hum then hum.WalkSpeed = v and Tools.SpeedVal or 16 end
-	end },
-	{ name = "Freecam", key = Enum.KeyCode.F6, get = function() return Tools.Freecam end, set = function(v) Tools.Freecam = v end },
-}
-
-local capturing = nil -- row sedang menunggu input baru
-
-UIS.InputBegan:Connect(function(i, gp)
-	if gp then return end
-	if capturing then
-		if i.UserInputType == Enum.UserInputType.Keyboard then
-			capturing.key = i.KeyCode
-			capturing.label.Text = capturing.name .. "  [" .. i.KeyCode.Name .. "]"
-			capturing = nil
-		end
-		return
-	end
-	for _, bind in Keybinds do
-		if i.KeyCode == bind.key then
-			bind.set(not bind.get())
-			notify(bind.name .. ": " .. (bind.get() and "On" or "Off"))
-		end
-	end
-end)
-
----------------------------------------------------------------- ESP ARROW (indikator luar FOV)
-local arrowGui = new("ScreenGui", { Name = "SQ_Arrow", ResetOnSpawn = false }, lp.PlayerGui)
-local arrowCache = {}
-
-RunService.RenderStepped:Connect(function()
-	if not E.On then
-		for _, a in arrowCache do a:Destroy() end
-		table.clear(arrowCache)
-		return
-	end
-	local cam2 = workspace.CurrentCamera
-	local size = cam2.ViewportSize
-	local center = Vector2.new(size.X / 2, size.Y / 2)
-	for _, p in Players:GetPlayers() do
-		if p ~= lp then
-			local oc = p.Character
-			local root = oc and oc:FindFirstChild("HumanoidRootPart")
-			local hum = oc and oc:FindFirstChildOfClass("Humanoid")
-			if root and hum and hum.Health > 0 then
-				local v = cam2:WorldToViewportPoint(root.Position)
-				local onScreen = v.Z > 0 and v.X >= 0 and v.X <= size.X and v.Y >= 0 and v.Y <= size.Y
-				if not onScreen then
-					if not arrowCache[p] then
-						local a = new("TextLabel", {
-							Size = UDim2.fromOffset(22, 22), BackgroundTransparency = 1, Text = "➤",
-							TextColor3 = Color3.fromRGB(255, 80, 80), Font = Enum.Font.GothamBold, TextSize = 20,
-							AnchorPoint = Vector2.new(0.5, 0.5),
-						}, arrowGui)
-						arrowCache[p] = a
-					end
-					local dir = Vector2.new(v.X, v.Y) - center
-					if v.Z < 0 then dir = -dir end
-					dir = dir.Magnitude > 0 and dir.Unit or Vector2.new(1, 0)
-					local margin = 40
-					local radius = math.min(size.X, size.Y) / 2 - margin
-					local pos = center + dir * radius
-					arrowCache[p].Position = UDim2.fromOffset(pos.X, pos.Y)
-					arrowCache[p].Rotation = math.deg(math.atan2(dir.Y, dir.X)) + 90
-				elseif arrowCache[p] then
-					arrowCache[p]:Destroy()
-					arrowCache[p] = nil
-				end
-			end
-		end
-	end
-end)
-
----------------------------------------------------------------- THEME SWITCHER (ganti warna UI keseluruhan)
-local THEMES = {
-	Default = { bg = Color3.fromRGB(22, 22, 30), bar = Color3.fromRGB(38, 38, 52), panel = Color3.fromRGB(32, 32, 44), accent = Color3.fromRGB(46, 160, 90) },
-	Merah = { bg = Color3.fromRGB(30, 18, 18), bar = Color3.fromRGB(55, 28, 28), panel = Color3.fromRGB(40, 24, 24), accent = Color3.fromRGB(200, 60, 60) },
-	Biru = { bg = Color3.fromRGB(16, 22, 32), bar = Color3.fromRGB(26, 36, 54), panel = Color3.fromRGB(22, 30, 44), accent = Color3.fromRGB(60, 120, 220) },
-	Ungu = { bg = Color3.fromRGB(26, 18, 32), bar = Color3.fromRGB(44, 28, 54), panel = Color3.fromRGB(34, 24, 42), accent = Color3.fromRGB(160, 80, 220) },
-}
-
-local function applyTheme(name)
-	local th = THEMES[name]
-	if not th then return end
-	menu.BackgroundColor3 = th.bg
-	titleBar.BackgroundColor3 = th.bar
-	panel.BackgroundColor3 = th.panel
-	flyPanel.BackgroundColor3 = th.panel
-	aimPanel.BackgroundColor3 = th.panel
-	speedPanel.BackgroundColor3 = th.panel
-	camPage.Parent.Parent.BackgroundColor3 = th.bg -- safe no-op guard
-	ON = th.accent
-end
-
-section("Theme")
-mkCycle(panel, ROW, "Theme", { "Default", "Merah", "Biru", "Ungu" }, "Default", function(v)
-	applyTheme(v)
-end)
-
----------------------------------------------------------------- PLAYER INFO PANEL (klik nama ESP)
-local infoGui = new("ScreenGui", { Name = "SQ_Info", ResetOnSpawn = false }, lp.PlayerGui)
-local infoFrame = new("Frame", {
-	Size = UDim2.fromOffset(200, 120), Position = UDim2.new(0.5, -100, 0.5, -60),
-	BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.1, Visible = false, ZIndex = 20,
-}, infoGui)
-corner(infoFrame, 10)
-new("UIStroke", { Color = Color3.fromRGB(80, 80, 90), Thickness = 1.5 }, infoFrame)
-pad(infoFrame, 10)
-local infoText = new("TextLabel", {
-	Size = UDim2.new(1, 0, 1, -28), BackgroundTransparency = 1, Text = "", TextColor3 = W,
-	Font = Enum.Font.Gotham, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
-	TextYAlignment = Enum.TextYAlignment.Top, TextWrapped = true,
-}, infoFrame)
-local infoClose = new("TextButton", {
-	Size = UDim2.new(1, 0, 0, 24), Position = UDim2.new(0, 0, 1, -24), BackgroundColor3 = Color3.fromRGB(60, 60, 75),
-	Text = "Tutup", TextColor3 = W, Font = Enum.Font.GothamMedium, TextSize = 13, AutoButtonColor = false,
-}, infoFrame)
-corner(infoClose, 6)
-infoClose.MouseButton1Click:Connect(function() infoFrame.Visible = false end)
-
-local function showPlayerInfo(p)
-	local oc = p.Character
-	local hum = oc and oc:FindFirstChildOfClass("Humanoid")
-	local root = oc and oc:FindFirstChild("HumanoidRootPart")
-	local myroot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
-	local dist = (root and myroot) and math.floor((root.Position - myroot.Position).Magnitude * STUD_TO_M) or 0
-	infoText.Text = ("Nama: %s\nTeam: %s\nHealth: %d / %d\nJarak: %dm"):format(
-		p.DisplayName, p.Team and p.Team.Name or "-",
-		hum and math.floor(hum.Health) or 0, hum and math.floor(hum.MaxHealth) or 0, dist
-	)
-	infoFrame.Visible = true
-end
-_G.SQ_ShowPlayerInfo = showPlayerInfo
-
--- Hook: klik label nama ESP buat munculin info (dipanggil dari BillboardGui nameL di bagian ESP, tambahkan ClickDetector sendiri jika perlu, atau panggil manual: _G.SQ_ShowPlayerInfo(player))
-
----------------------------------------------------------------- AUTO SAVE CONFIG
-task.spawn(function()
-	while true do
-		task.wait(15)
-		saveConfig()
-	end
-end)
-
-game:BindToClose(saveConfig)
----------------------------------------------------------------- CONFIG TAMBAHAN GLOBAL
-local Misc = {
-	Crosshair = false,
-	CrossColor = Color3.fromRGB(255, 255, 255),
-	HealthBar = true,
-	AutoHeal = false,
-	HealPercent = 40,
-	FakeLag = false,
-	FakeLagMs = 150,
-	PredictLine = false,
-	NoRecoil = false,
-	NoSway = false,
-	GuiLock = true,
-	SoundEsp = false,
-	SoundRange = 60,
-}
-
----------------------------------------------------------------- CROSSHAIR CUSTOM
-local crossGui = new("ScreenGui", { Name = "SQ_Cross", ResetOnSpawn = false }, lp.PlayerGui)
-local crossFrame = new("Frame", {
-	Size = UDim2.fromOffset(20, 20), AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.new(0.5, 0, 0.5, 0), BackgroundTransparency = 1, Visible = false,
-}, crossGui)
-local function mkCrossLine(size, pos)
-	return new("Frame", { Size = size, Position = pos, AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Misc.CrossColor, BorderSizePixel = 0 }, crossFrame)
-end
-local lineTop = mkCrossLine(UDim2.fromOffset(2, 8), UDim2.new(0.5, 0, 0, 2))
-local lineBottom = mkCrossLine(UDim2.fromOffset(2, 8), UDim2.new(0.5, 0, 1, -2))
-local lineLeft = mkCrossLine(UDim2.fromOffset(8, 2), UDim2.new(0, 2, 0.5, 0))
-local lineRight = mkCrossLine(UDim2.fromOffset(8, 2), UDim2.new(1, -2, 0.5, 0))
-
-local function setCrossColor(c)
-	Misc.CrossColor = c
-	for _, l in { lineTop, lineBottom, lineLeft, lineRight } do l.BackgroundColor3 = c end
-end
-crossFrame.Visible = Misc.Crosshair
-
----------------------------------------------------------------- ESP HEALTH BAR
--- Terintegrasi ke BillboardGui ESP (c.tag) yang sudah ada; tambahkan bar kecil di bawah nama/jarak.
-local healthBars = {}
-RunService.RenderStepped:Connect(function()
-	if not Misc.HealthBar or not E.On then
-		for _, hb in healthBars do hb.frame:Destroy() end
-		table.clear(healthBars)
-		return
-	end
-	for _, p in Players:GetPlayers() do
-		if p ~= lp then
-			local c = cache[p]
-			if c and c.tag then
-				local oc = p.Character
-				local hum = oc and oc:FindFirstChildOfClass("Humanoid")
-				if hum then
-					if not healthBars[p] then
-						local bg = new("Frame", { Size = UDim2.fromOffset(60, 5), Position = UDim2.fromOffset(50, 32), BackgroundColor3 = Color3.fromRGB(40, 40, 40) }, c.tag)
-						corner(bg, 2)
-						local fill = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = Color3.fromRGB(70, 220, 90) }, bg)
-						corner(fill, 2)
-						healthBars[p] = { frame = bg, fill = fill }
-					end
-					local pct = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
-					healthBars[p].fill.Size = UDim2.new(pct, 0, 1, 0)
-					healthBars[p].fill.BackgroundColor3 = Color3.fromRGB(255 - math.floor(pct * 185), 60 + math.floor(pct * 160), 60)
-				end
-			elseif healthBars[p] then
-				healthBars[p].frame:Destroy()
-				healthBars[p] = nil
-			end
-		end
-	end
-end)
-
----------------------------------------------------------------- AUTO HEAL
-RunService.Heartbeat:Connect(function()
-	if not Misc.AutoHeal then return end
-	local char = lp.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if not hum then return end
-	local pct = hum.Health / math.max(hum.MaxHealth, 1) * 100
-	if pct <= Misc.HealPercent then
-		local backpack = lp:FindFirstChild("Backpack")
-		if backpack then
-			for _, tool in backpack:GetChildren() do
-				if tool.Name:lower():find("heal") or tool.Name:lower():find("potion") or tool.Name:lower():find("food") then
-					char.Humanoid:EquipTool(tool)
-					task.wait(0.1)
-					tool:Activate()
-					notify("Auto Heal: pakai " .. tool.Name)
-					break
-				end
-			end
-		end
-	end
-end)
-
----------------------------------------------------------------- FAKE LAG / PACKET DELAY SIMULATOR
--- Menunda replikasi gerak LOKAL sendiri untuk testing lag compensation di game kamu.
-local fakeLagQueue = {}
-RunService.Heartbeat:Connect(function()
-	if not Misc.FakeLag then
-		table.clear(fakeLagQueue)
-		return
-	end
-	local char = lp.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	if not root then return end
-	table.insert(fakeLagQueue, { t = os.clock(), cf = root.CFrame })
-	local delay = Misc.FakeLagMs / 1000
-	while #fakeLagQueue > 0 and os.clock() - fakeLagQueue[1].t >= delay do
-		table.remove(fakeLagQueue, 1)
-	end
-end)
-
----------------------------------------------------------------- PREDICTION LINE (arah gerak musuh)
-local predictGui = new("ScreenGui", { Name = "SQ_Predict", ResetOnSpawn = false }, lp.PlayerGui)
-local predictCache = {}
-local lastPos = {}
-
-RunService.RenderStepped:Connect(function(dt)
-	if not Misc.PredictLine then
-		for _, l in predictCache do l:Destroy() end
-		table.clear(predictCache)
-		return
-	end
-	local cam2 = workspace.CurrentCamera
-	for _, p in Players:GetPlayers() do
-		if p ~= lp then
-			local oc = p.Character
-			local root = oc and oc:FindFirstChild("HumanoidRootPart")
-			if root then
-				local prev = lastPos[p]
-				lastPos[p] = root.Position
-				if prev then
-					local vel = (root.Position - prev) / dt
-					local futurePos = root.Position + vel * 0.5
-					local v1 = cam2:WorldToViewportPoint(root.Position)
-					local v2 = cam2:WorldToViewportPoint(futurePos)
-					if v1.Z > 0 and v2.Z > 0 then
-						if not predictCache[p] then
-							predictCache[p] = new("Frame", { BackgroundColor3 = Color3.fromRGB(255, 220, 60), BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0.5) }, predictGui)
-						end
-						local a, b = Vector2.new(v1.X, v1.Y), Vector2.new(v2.X, v2.Y)
-						local diff = b - a
-						predictCache[p].Size = UDim2.fromOffset(diff.Magnitude, 2)
-						predictCache[p].Position = UDim2.fromOffset((a.X + b.X) / 2, (a.Y + b.Y) / 2)
-						predictCache[p].Rotation = math.deg(math.atan2(diff.Y, diff.X))
-					end
-				end
-			end
-		end
-	end
-end)
-
----------------------------------------------------------------- NO RECOIL / NO SWAY
--- Hook kamera: batalkan offset recoil/sway yang biasanya ditambahkan lewat CameraOffset atau tween kamera game.
-RunService.RenderStepped:Connect(function()
-	local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
-	if not hum then return end
-	if Misc.NoRecoil or Misc.NoSway then
-		hum.CameraOffset = Vector3.new(0, 0, 0)
-	end
-end)
-
----------------------------------------------------------------- GUI LOCK (jangan ke-reset pas respawn)
-lp.CharacterAdded:Connect(function()
-	if Misc.GuiLock then
-		for _, g in lp.PlayerGui:GetChildren() do
-			if g.Name:match("^SQ_") or g.Name == "ScriptQuu" then
-				g.ResetOnSpawn = false
-			end
-		end
-	end
-end)
-
----------------------------------------------------------------- SOUND ESP (beep makin kenceng makin deket)
-local beepSound = Instance.new("Sound")
-beepSound.SoundId = "rbxassetid://9125662774" -- ganti ID beep sesuai selera
-beepSound.Volume = 0
-beepSound.Looped = true
-beepSound.Parent = lp.PlayerGui
-beepSound:Play()
-
-RunService.Heartbeat:Connect(function()
-	if not Misc.SoundEsp then
-		beepSound.Volume = 0
-		return
-	end
-	local char = lp.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	if not root then return end
-	local closest
-	for _, p in Players:GetPlayers() do
-		if p ~= lp then
-			local oc = p.Character
-			local oroot = oc and oc:FindFirstChild("HumanoidRootPart")
-			if oroot then
-				local d = (oroot.Position - root.Position).Magnitude
-				if not closest or d < closest then closest = d end
-			end
-		end
-	end
-	if closest and closest <= Misc.SoundRange then
-		beepSound.Volume = (1 - closest / Misc.SoundRange) * 0.6
-		beepSound.PlaybackSpeed = 1 + (1 - closest / Misc.SoundRange)
-	else
-		beepSound.Volume = 0
-	end
-end)
-
----------------------------------------------------------------- ADMIN COMMAND PANEL (khusus owner game kamu)
-local adminPage = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false }, pages)
-pad(adminPage, 8); list(adminPage, 6)
-
-local goAdmin = new("TextButton", {
-	Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = OFF, Text = "Admin", TextColor3 = W,
-	Font = Enum.Font.GothamBold, TextSize = 15, AutoButtonColor = false, LayoutOrder = nextOrder(),
-}, home)
-corner(goAdmin)
-goAdmin.MouseButton1Click:Connect(function() showPage("Admin") end)
-
-local oldShowPageAdmin = showPage
-showPage = function(name)
-	oldShowPageAdmin(name)
-	adminPage.Visible = name == "Admin"
-end
-
-local adminRow = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, adminPage)
-local adminBox = new("TextBox", {
-	Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = OFF, Text = "", PlaceholderText = "Username target",
-	TextColor3 = W, PlaceholderColor3 = Color3.fromRGB(170, 170, 180), Font = Enum.Font.Gotham, TextSize = 14,
-	ClearTextOnFocus = false,
-}, adminRow)
-corner(adminBox)
-new("UIPadding", { PaddingLeft = UDim.new(0, 8) }, adminBox)
-
-local function findTarget()
-	for _, p in Players:GetPlayers() do
-		if p.Name:lower() == adminBox.Text:lower() or p.DisplayName:lower() == adminBox.Text:lower() then
-			return p
-		end
-	end
-	return nil
-end
-
-local function adminBtn(label, fn)
+showPage("Visual")
+
+-- PANEL SETTINGAN ESP (di sebelah kiri menu)
+local sp = new("Frame", {AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(0, -8, 0, 0), Size = UDim2.new(0, 230, 0, 300), BackgroundColor3 = BG, Visible = false, Active = true}, menu)
+round(sp, 8) stroke(sp)
+new("TextLabel", {Position = UDim2.new(0, 10, 0, 6), Size = UDim2.new(1, -20, 0, 24), BackgroundTransparency = 1, Text = "Esp Settings", TextColor3 = TXT, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left}, sp)
+local spList = new("ScrollingFrame", {Position = UDim2.new(0, 6, 0, 34), Size = UDim2.new(1, -12, 1, -40), BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3, AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new()}, sp)
+new("UIListLayout", {Padding = UDim.new(0, 6)}, spList)
+
+local refreshers = {}
+local function refreshAll() for _, f in ipairs(refreshers) do f() end end
+
+local function makeRow(parent, label, key, withGear)
+	local r = new("Frame", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = ROW, BorderSizePixel = 0}, parent)
+	round(r, 6)
 	local b = new("TextButton", {
-		Size = UDim2.new(1, 0, 0, 32), BackgroundColor3 = OFF, Text = label, TextColor3 = W,
-		Font = Enum.Font.GothamMedium, TextSize = 14, AutoButtonColor = false, LayoutOrder = nextOrder(),
-	}, adminPage)
-	corner(b)
-	b.MouseButton1Click:Connect(function()
-		local t = findTarget()
-		if not t then notify("Target tidak ditemukan") return end
-		fn(t)
+		Size = UDim2.new(1, withGear and -36 or 0, 1, 0), BackgroundTransparency = 1, Text = label, TextColor3 = DIM,
+		Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
+	}, r)
+	new("UIPadding", {PaddingLeft = UDim.new(0, 10)}, b)
+	local dot = new("Frame", {Size = UDim2.new(0, 8, 0, 8), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), BackgroundColor3 = Color3.fromRGB(70, 70, 70)}, b)
+	round(dot, 4)
+	local function refresh()
+		local on = cfg[key]
+		dot.BackgroundColor3 = on and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(70, 70, 70)
+		b.TextColor3 = on and TXT or DIM
+	end
+	table.insert(refreshers, refresh)
+	b.Activated:Connect(function()
+		cfg[key] = not cfg[key]
+		refresh()
+		save()
 	end)
+	if withGear then
+		local g = new("TextButton", {Position = UDim2.new(1, -34, 0, 2), Size = UDim2.new(0, 30, 0, 30), BackgroundTransparency = 1, Text = "⚙️", TextColor3 = TXT, TextSize = 16, Font = Enum.Font.Gotham}, r)
+		g.Activated:Connect(function() sp.Visible = not sp.Visible end)
+	end
+	refresh()
 end
 
-adminBtn("Kick (lokal hide)", function(t)
-	-- Catatan: kick asli butuh Script di server (lihat catatan di bawah)
-	notify("Kick butuh ServerScript, lihat catatan")
+makeRow(pages.Visual, "Esp", "esp", true)
+
+local keys = {
+	{"name", "Esp Nama + Team"}, {"dist", "Esp Jarak (stud)"}, {"full", "Esp Player (Full Body)"},
+	{"hitbox", "Esp Hitbox"}, {"walls", "Esp Sensitive to Walls"}, {"tracker", "Esp Tracker"}, {"sound", "Esp Sound + Body"},
+}
+local allRow = new("TextButton", {Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = Color3.fromRGB(40, 40, 40), Text = "Aktifkan Semua", TextColor3 = TXT, Font = Enum.Font.GothamMedium, TextSize = 13, AutoButtonColor = false}, spList)
+round(allRow, 6)
+allRow.Activated:Connect(function()
+	local all = true
+	for _, k in ipairs(keys) do if not cfg[k[1]] then all = false end end
+	for _, k in ipairs(keys) do cfg[k[1]] = not all end
+	refreshAll()
+	save()
 end)
-adminBtn("Teleport ke saya", function(t)
-	local myroot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
-	local troot = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
-	if myroot and troot then troot.CFrame = myroot.CFrame + Vector3.new(2, 0, 0) end
-end)
-adminBtn("Freeze (anchor)", function(t)
-	local troot = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
-	if troot then troot.Anchored = not troot.Anchored end
+for _, k in ipairs(keys) do makeRow(spList, k[2], k[1], false) end
+
+-- ESP CORE
+local folder = new("Folder", {Name = "SQ_ESP"}, cam)
+local esp = {}
+local rp = RaycastParams.new()
+rp.FilterType = Enum.RaycastFilterType.Exclude
+
+local beep = new("Sound", {SoundId = "rbxasset://sounds/electronicpingshort.wav", Volume = 1.5}, SoundService)
+
+local function teamColor(p)
+	return p.Team and p.Team.TeamColor.Color or Color3.fromRGB(255, 255, 255)
+end
+
+local function clear(p)
+	local e = esp[p]
+	if not e then return end
+	for _, o in pairs({e.box, e.hl, e.bb, e.hit, e.alert, e.line}) do o:Destroy() end
+	esp[p] = nil
+end
+
+local function build(p, ch, root)
+	local head = ch:FindFirstChild("Head") or root
+	local e = {char = ch, near = false, alertUntil = 0, lastHit = 0}
+	e.box = new("BoxHandleAdornment", {Adornee = root, Size = Vector3.new(4, 5, 2), AlwaysOnTop = true, ZIndex = 1, Transparency = 0.6, Visible = false}, folder)
+	e.hl = new("Highlight", {Adornee = ch, FillTransparency = 0.7, OutlineTransparency = 0, DepthMode = Enum.HighlightDepthMode.AlwaysOnTop, Enabled = false}, folder)
+	e.alert = new("Highlight", {Adornee = ch, FillColor = Color3.fromRGB(255, 40, 40), OutlineColor = Color3.fromRGB(255, 255, 255), FillTransparency = 0.35, DepthMode = Enum.HighlightDepthMode.AlwaysOnTop, Enabled = false}, folder)
+	e.hit = new("Folder", {}, folder)
+	e.bb = new("BillboardGui", {Adornee = head, Size = UDim2.new(0, 200, 0, 34), StudsOffset = Vector3.new(0, 2.6, 0), AlwaysOnTop = true, Enabled = false}, gui)
+	e.lbl = new("TextLabel", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 13, TextStrokeTransparency = 0.4, TextColor3 = Color3.new(1, 1, 1)}, e.bb)
+	e.line = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), BorderSizePixel = 0, BackgroundTransparency = 0.4, Visible = false}, gui)
+	esp[p] = e
+	return e
+end
+
+local function hide(e)
+	e.box.Visible = false
+	e.hl.Enabled = false
+	e.bb.Enabled = false
+	e.hit:ClearAllChildren()
+	e.line.Visible = false
+	e.alert.Enabled = false
+end
+
+local function rebuildHit(e, ch, root, color)
+	e.hit:ClearAllChildren()
+	for _, part in ipairs(ch:GetChildren()) do
+		if part:IsA("BasePart") and part ~= root then
+			new("BoxHandleAdornment", {Adornee = part, Size = part.Size, Color3 = color, Transparency = 0.7, AlwaysOnTop = true, ZIndex = 1}, e.hit)
+		elseif part:IsA("Tool") then
+			for _, d in ipairs(part:GetDescendants()) do
+				if d:IsA("BasePart") then
+					new("BoxHandleAdornment", {Adornee = d, Size = d.Size, Color3 = Color3.fromRGB(255, 150, 0), Transparency = 0.4, AlwaysOnTop = true, ZIndex = 2}, e.hit)
+				end
+			end
+		end
+	end
+	-- arah hadap
+	new("BoxHandleAdornment", {Adornee = root, Size = Vector3.new(0.25, 0.25, 5), CFrame = CFrame.new(0, 0, -3.5), Color3 = Color3.fromRGB(255, 230, 0), Transparency = 0.2, AlwaysOnTop = true, ZIndex = 3}, e.hit)
+end
+
+local function canSee(ch, root)
+	rp.FilterDescendantsInstances = {lp.Character, ch}
+	local o = cam.CFrame.Position
+	return Workspace:Raycast(o, root.Position - o, rp) == nil
+end
+
+RunService.RenderStepped:Connect(function()
+	cam = Workspace.CurrentCamera
+	local myChar = lp.Character
+	local my = myChar and myChar:FindFirstChild("HumanoidRootPart")
+	local now = os.clock()
+	local vp = cam.ViewportSize
+
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p == lp then continue end
+		local ch = p.Character
+		local root = ch and ch:FindFirstChild("HumanoidRootPart")
+		local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+		local e = esp[p]
+
+		if e and e.char ~= ch then clear(p) e = nil end
+
+		if not cfg.esp or not root or not hum or hum.Health <= 0 or not my then
+			if e then hide(e) end
+			continue
+		end
+		if not e then e = build(p, ch, root) end
+
+		local color = teamColor(p)
+		local dist = (root.Position - my.Position).Magnitude
+		local show = (not cfg.walls) or canSee(ch, root)
+
+		-- body / full body
+		e.box.Color3 = color
+		e.hl.FillColor = color
+		e.hl.OutlineColor = color
+		e.box.Visible = show and not cfg.full
+		e.hl.Enabled = show and cfg.full
+
+		-- nama + jarak
+		if show and (cfg.name or cfg.dist) then
+			local t = {}
+			if cfg.dist then table.insert(t, math.floor(dist) .. " stud") end
+			if cfg.name then table.insert(t, "@" .. p.Name .. "(" .. (p.Team and p.Team.Name or "No Team") .. ")") end
+			e.lbl.Text = table.concat(t, "\n")
+			e.lbl.TextColor3 = color
+			e.bb.Enabled = true
+		else
+			e.bb.Enabled = false
+		end
+
+		-- hitbox
+		if show and cfg.hitbox then
+			if now - e.lastHit > 0.3 then
+				e.lastHit = now
+				rebuildHit(e, ch, root, color)
+			end
+		else
+			e.hit:ClearAllChildren()
+		end
+
+		-- tracker (garis jaring dari bawah layar)
+		if cfg.tracker then
+			local v = cam:WorldToViewportPoint(root.Position)
+			if v.Z > 0 then
+				local a, b = Vector2.new(vp.X / 2, vp.Y), Vector2.new(v.X, v.Y)
+				local d = b - a
+				e.line.Size = UDim2.new(0, d.Magnitude, 0, 1)
+				e.line.Position = UDim2.new(0, (a.X + b.X) / 2, 0, (a.Y + b.Y) / 2)
+				e.line.Rotation = math.deg(math.atan2(d.Y, d.X))
+				e.line.BackgroundColor3 = color
+				e.line.Visible = true
+			else
+				e.line.Visible = false
+			end
+		else
+			e.line.Visible = false
+		end
+
+		-- sound + body (beda team mendekat)
+		local enemy = p.Team ~= lp.Team or (p.Team == nil and lp.Team ~= nil)
+		if cfg.sound and enemy and dist <= SOUND_RANGE then
+			if not e.near then
+				e.near = true
+				beep:Play()
+			end
+			e.alertUntil = now + 2.5
+		else
+			e.near = false
+		end
+		e.alert.Enabled = cfg.sound and now < e.alertUntil
+	end
 end)
 
----------------------------------------------------------------- EXPORT / IMPORT CONFIG (via text)
-local exportRow = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, adminPage)
-local exportBtn = new("TextButton", {
-	Size = UDim2.new(0.5, -4, 1, 0), BackgroundColor3 = ON, Text = "Export Config", TextColor3 = W,
-	Font = Enum.Font.GothamBold, TextSize = 13, AutoButtonColor = false,
-}, exportRow)
-corner(exportBtn)
-local importBtn = new("TextButton", {
-	Size = UDim2.new(0.5, -4, 1, 0), Position = UDim2.new(0.5, 4, 0, 0), BackgroundColor3 = OFF,
-	Text = "Import Config", TextColor3 = W, Font = Enum.Font.GothamBold, TextSize = 13, AutoButtonColor = false,
-}, exportRow)
-corner(importBtn)
-
-local importRow = new("Frame", { Size = UDim2.new(1, 0, 0, 60), BackgroundTransparency = 1, LayoutOrder = nextOrder() }, adminPage)
-local importBox = new("TextBox", {
-	Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = OFF, Text = "", PlaceholderText = "Tempel config di sini...",
-	TextColor3 = W, PlaceholderColor3 = Color3.fromRGB(170, 170, 180), Font = Enum.Font.Gotham, TextSize = 12,
-	ClearTextOnFocus = false, MultiLine = true, TextWrapped = true,
-}, importRow)
-corner(importBox)
-pad(importBox, 6)
-
-exportBtn.MouseButton1Click:Connect(function()
-	local data = HttpService:JSONEncode({ E = E, X = X, T = T, Tools = Tools, Zoom = Zoom, Misc = Misc })
-	importBox.Text = data
-	pcall(function() setclipboard(data) end)
-	notify("Config disalin ke clipboard")
-end)
-importBtn.MouseButton1Click:Connect(function()
-	local ok, data = pcall(function() return HttpService:JSONDecode(importBox.Text) end)
-	if not ok or not data then notify("Config tidak valid") return end
-	for k, v in data.E or {} do E[k] = v end
-	for k, v in data.X or {} do X[k] = v end
-	for k, v in data.T or {} do T[k] = v end
-	for k, v in data.Tools or {} do Tools[k] = v end
-	for k, v in data.Zoom or {} do Zoom[k] = v end
-	for k, v in data.Misc or {} do Misc[k] = v end
-	notify("Config berhasil di-import")
-end)
-
----------------------------------------------------------------- UI TOGGLES MISC (tempel di halaman mana pun, contoh di panel ESP)
-section("Misc")
-tg("Crosshair", Misc, "Crosshair")
-crossFrame.Visible = Misc.Crosshair
-tg("Esp Health Bar", Misc, "HealthBar")
-tg("Auto Heal", Misc, "AutoHeal")
-tg("Fake Lag", Misc, "FakeLag")
-tg("Prediction Line", Misc, "PredictLine")
-tg("No Recoil", Misc, "NoRecoil")
-tg("No Sway", Misc, "NoSway")
-tg("Gui Lock", Misc, "GuiLock")
-tg("Sound Esp", Misc, "SoundEsp")
+Players.PlayerRemoving:Connect(clear)
+refreshAll()
