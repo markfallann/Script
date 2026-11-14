@@ -1,0 +1,268 @@
+-- HubQu (LocalScript)
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UIS = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+
+local lp = Players.LocalPlayer
+local FILE = "HubQu.json"
+local scripts = {}
+
+-- storage
+local hasFS = (writefile and readfile and isfile) and true or false
+local function save()
+	if hasFS then pcall(function() writefile(FILE, HttpService:JSONEncode(scripts)) end) end
+end
+local function load()
+	if hasFS and isfile(FILE) then
+		local ok, d = pcall(function() return HttpService:JSONDecode(readfile(FILE)) end)
+		if ok and type(d) == "table" then scripts = d end
+	end
+end
+load()
+
+-- ui helpers
+local function new(class, props, parent)
+	local o = Instance.new(class)
+	for k, v in pairs(props) do o[k] = v end
+	if parent then o.Parent = parent end
+	return o
+end
+local function corner(p, r) new("UICorner", {CornerRadius = UDim.new(0, r)}, p) end
+local function stroke(p, t)
+	return new("UIStroke", {Color = Color3.new(1, 1, 1), Transparency = t or 0.92, Thickness = 1}, p)
+end
+local function press(btn, base)
+	local sc = new("UIScale", {Scale = 1}, btn)
+	local info = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
+	local function tw(o, p) TweenService:Create(o, info, p):Play() end
+	btn.MouseEnter:Connect(function() tw(btn, {BackgroundTransparency = math.max(base - 0.12, 0)}) end)
+	btn.MouseLeave:Connect(function() tw(btn, {BackgroundTransparency = base}) tw(sc, {Scale = 1}) end)
+	btn.MouseButton1Down:Connect(function() tw(sc, {Scale = 0.97}) end)
+	btn.MouseButton1Up:Connect(function() tw(sc, {Scale = 1}) end)
+end
+local function button(text, parent, size, pos, base)
+	base = base or 0.85
+	local b = new("TextButton", {
+		Text = text, Size = size, Position = pos or UDim2.new(),
+		BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = base,
+		TextColor3 = Color3.fromRGB(240, 240, 245), Font = Enum.Font.GothamMedium,
+		TextSize = 13, AutoButtonColor = false,
+	}, parent)
+	corner(b, 8) stroke(b) press(b, base)
+	return b
+end
+
+-- gui
+local gui = new("ScreenGui", {Name = "HubQu", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 999}, lp:WaitForChild("PlayerGui"))
+
+local toggle = new("TextButton", {
+	Text = "Q", Size = UDim2.fromOffset(38, 38), Position = UDim2.new(1, -54, 0, 16),
+	BackgroundColor3 = Color3.fromRGB(24, 24, 30), BackgroundTransparency = 0.15,
+	TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 16, AutoButtonColor = false,
+}, gui)
+corner(toggle, 12) stroke(toggle, 0.85) press(toggle, 0.15)
+
+local panel = new("Frame", {
+	Size = UDim2.fromOffset(340, 430), Position = UDim2.new(1, -356, 0, 62),
+	BackgroundColor3 = Color3.fromRGB(18, 18, 24), BackgroundTransparency = 0.12, Visible = false,
+}, gui)
+corner(panel, 14) stroke(panel, 0.9)
+
+new("TextLabel", {
+	Text = "HubQu", Size = UDim2.new(1, -24, 0, 36), Position = UDim2.fromOffset(16, 8),
+	BackgroundTransparency = 1, TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold,
+	TextSize = 18, TextXAlignment = Enum.TextXAlignment.Left,
+}, panel)
+
+local search = new("TextBox", {
+	PlaceholderText = "Cari script...", Text = "", ClearTextOnFocus = false,
+	Size = UDim2.new(1, -96, 0, 32), Position = UDim2.fromOffset(16, 48),
+	BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.92,
+	TextColor3 = Color3.new(1, 1, 1), PlaceholderColor3 = Color3.fromRGB(150, 150, 160),
+	Font = Enum.Font.Gotham, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
+}, panel)
+corner(search, 8) stroke(search) new("UIPadding", {PaddingLeft = UDim.new(0, 10)}, search)
+
+local addBtn = button("Add", panel, UDim2.fromOffset(64, 32), UDim2.new(1, -80, 0, 48))
+
+local list = new("ScrollingFrame", {
+	Size = UDim2.new(1, -32, 1, -100), Position = UDim2.fromOffset(16, 90),
+	BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3,
+	ScrollBarImageColor3 = Color3.fromRGB(120, 120, 130), CanvasSize = UDim2.new(),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+}, panel)
+new("UIListLayout", {Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder}, list)
+
+local toast = new("TextLabel", {
+	Text = "", Size = UDim2.fromOffset(260, 30), Position = UDim2.new(0.5, -130, 1, -50),
+	BackgroundColor3 = Color3.fromRGB(24, 24, 30), BackgroundTransparency = 0.1, TextColor3 = Color3.new(1, 1, 1),
+	Font = Enum.Font.Gotham, TextSize = 12, Visible = false,
+}, gui)
+corner(toast, 8) stroke(toast, 0.85)
+local function notify(t)
+	toast.Text = t toast.Visible = true
+	task.delay(2.2, function() if toast.Text == t then toast.Visible = false end end)
+end
+
+-- skeleton shimmer
+local shimmers = {}
+local function skeleton(parent, n)
+	for i = 1, n do
+		local f = new("Frame", {Name = "Skel", Size = UDim2.new(1, -6, 0, 56), BackgroundColor3 = Color3.fromRGB(40, 40, 48), LayoutOrder = i}, parent)
+		corner(f, 10)
+		local g = new("UIGradient", {
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(40, 40, 48)),
+				ColorSequenceKeypoint.new(0.5, Color3.fromRGB(70, 70, 82)),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(40, 40, 48)),
+			}),
+		}, f)
+		table.insert(shimmers, g)
+	end
+end
+local t0 = os.clock()
+RunService.RenderStepped:Connect(function()
+	local x = ((os.clock() - t0) % 1.5) / 1.5 * 2 - 1
+	for _, g in ipairs(shimmers) do if g.Parent then g.Offset = Vector2.new(x, 0) end end
+end)
+
+-- detail popup
+local detail = new("Frame", {
+	Size = UDim2.fromOffset(280, 170), Position = UDim2.new(0.5, -140, 0.5, -85),
+	BackgroundColor3 = Color3.fromRGB(22, 22, 28), BackgroundTransparency = 0.05, Visible = false, ZIndex = 5,
+}, gui)
+corner(detail, 14) stroke(detail, 0.85)
+local dTitle = new("TextLabel", {Size = UDim2.new(1, -24, 0, 26), Position = UDim2.fromOffset(12, 12), BackgroundTransparency = 1, TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 16, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 6}, detail)
+local dAuthor = new("TextLabel", {Size = UDim2.new(1, -24, 0, 18), Position = UDim2.fromOffset(12, 40), BackgroundTransparency = 1, TextColor3 = Color3.fromRGB(160, 160, 170), Font = Enum.Font.Gotham, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 6}, detail)
+local dExec = button("Execute", detail, UDim2.new(1, -24, 0, 34), UDim2.fromOffset(12, 76))
+local dDel = button("Delete", detail, UDim2.new(0.5, -16, 0, 30), UDim2.fromOffset(12, 122), 0.9)
+local dClose = button("Close", detail, UDim2.new(0.5, -16, 0, 30), UDim2.new(0.5, 4, 0, 122), 0.9)
+for _, c in ipairs({dExec, dDel, dClose}) do c.ZIndex = 6 end
+local current
+
+-- add popup
+local addF = new("Frame", {
+	Size = UDim2.fromOffset(320, 300), Position = UDim2.new(0.5, -160, 0.5, -150),
+	BackgroundColor3 = Color3.fromRGB(22, 22, 28), BackgroundTransparency = 0.05, Visible = false, ZIndex = 5,
+}, gui)
+corner(addF, 14) stroke(addF, 0.85)
+local function field(ph, pos, size, multi)
+	local t = new("TextBox", {
+		PlaceholderText = ph, Text = "", ClearTextOnFocus = false, MultiLine = multi or false,
+		Size = size, Position = pos, BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.92,
+		TextColor3 = Color3.new(1, 1, 1), PlaceholderColor3 = Color3.fromRGB(150, 150, 160),
+		Font = multi and Enum.Font.Code or Enum.Font.Gotham, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = multi and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center, TextWrapped = true, ZIndex = 6,
+	}, addF)
+	corner(t, 8) stroke(t) new("UIPadding", {PaddingLeft = UDim.new(0, 8), PaddingTop = UDim.new(0, 6), PaddingRight = UDim.new(0, 8)}, t)
+	return t
+end
+local nameBox = field("Nama script", UDim2.fromOffset(12, 14), UDim2.new(1, -24, 0, 32))
+local codeBox = field("Tempel kode di sini", UDim2.fromOffset(12, 54), UDim2.new(1, -24, 0, 184), true)
+local saveBtn = button("Save", addF, UDim2.new(0.5, -16, 0, 32), UDim2.fromOffset(12, 252))
+local cancelBtn = button("Cancel", addF, UDim2.new(0.5, -16, 0, 32), UDim2.new(0.5, 4, 0, 252), 0.9)
+saveBtn.ZIndex = 6 cancelBtn.ZIndex = 6
+
+-- list render
+local function render()
+	for _, c in ipairs(list:GetChildren()) do
+		if c:IsA("GuiObject") then c:Destroy() end
+	end
+	local q = search.Text:lower()
+	local n = 0
+	for i, s in ipairs(scripts) do
+		if q == "" or s.name:lower():find(q, 1, true) or s.author:lower():find(q, 1, true) then
+			n += 1
+			local card = new("TextButton", {
+				Text = "", Size = UDim2.new(1, -6, 0, 56), LayoutOrder = i, AutoButtonColor = false,
+				BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.93,
+			}, list)
+			corner(card, 10)
+			local st = stroke(card, 0.92)
+			local sc = new("UIScale", {Scale = 1}, card)
+			new("TextLabel", {Text = s.name, Size = UDim2.new(1, -20, 0, 22), Position = UDim2.fromOffset(12, 8), BackgroundTransparency = 1, TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamMedium, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd}, card)
+			new("TextLabel", {Text = "oleh " .. s.author, Size = UDim2.new(1, -20, 0, 16), Position = UDim2.fromOffset(12, 31), BackgroundTransparency = 1, TextColor3 = Color3.fromRGB(150, 150, 162), Font = Enum.Font.Gotham, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left}, card)
+			local info = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
+			card.MouseEnter:Connect(function() TweenService:Create(st, info, {Transparency = 0.7}):Play() TweenService:Create(sc, info, {Scale = 1.015}):Play() end)
+			card.MouseLeave:Connect(function() TweenService:Create(st, info, {Transparency = 0.92}):Play() TweenService:Create(sc, info, {Scale = 1}):Play() end)
+			card.MouseButton1Down:Connect(function() TweenService:Create(sc, info, {Scale = 0.99}):Play() end)
+			card.MouseButton1Click:Connect(function()
+				current = s
+				dTitle.Text = s.name
+				dAuthor.Text = "Pembuat: " .. s.author
+				dDel.Visible = (s.author == lp.Name)
+				dClose.Size = dDel.Visible and UDim2.new(0.5, -16, 0, 30) or UDim2.new(1, -24, 0, 30)
+				dClose.Position = dDel.Visible and UDim2.new(0.5, 4, 0, 122) or UDim2.fromOffset(12, 122)
+				detail.Visible = true
+			end)
+		end
+	end
+	if n == 0 then
+		new("TextLabel", {Name = "Empty", Text = "Belum ada script", Size = UDim2.new(1, 0, 0, 40), BackgroundTransparency = 1, TextColor3 = Color3.fromRGB(130, 130, 142), Font = Enum.Font.Gotham, TextSize = 12}, list)
+	end
+end
+
+local function openPanel()
+	panel.Visible = true
+	for _, c in ipairs(list:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
+	skeleton(list, 4)
+	task.delay(0.6, function()
+		for i = #shimmers, 1, -1 do table.remove(shimmers, i) end
+		render()
+	end)
+end
+
+-- events
+toggle.MouseButton1Click:Connect(function()
+	if panel.Visible then panel.Visible = false detail.Visible = false addF.Visible = false else openPanel() end
+end)
+search:GetPropertyChangedSignal("Text"):Connect(render)
+addBtn.MouseButton1Click:Connect(function() nameBox.Text = "" codeBox.Text = "" addF.Visible = true end)
+cancelBtn.MouseButton1Click:Connect(function() addF.Visible = false end)
+dClose.MouseButton1Click:Connect(function() detail.Visible = false end)
+
+saveBtn.MouseButton1Click:Connect(function()
+	if nameBox.Text:gsub("%s", "") == "" or codeBox.Text:gsub("%s", "") == "" then notify("Nama dan kode wajib diisi") return end
+	table.insert(scripts, {name = nameBox.Text, author = lp.Name, code = codeBox.Text})
+	save() render()
+	addF.Visible = false
+	notify("Tersimpan")
+end)
+
+dDel.MouseButton1Click:Connect(function()
+	for i, s in ipairs(scripts) do if s == current then table.remove(scripts, i) break end end
+	save() render()
+	detail.Visible = false
+	notify("Dihapus")
+end)
+
+dExec.MouseButton1Click:Connect(function()
+	if not current then return end
+	local ls = loadstring
+	if not ls then notify("loadstring tidak tersedia") return end
+	local fn, err = ls(current.code)
+	if not fn then notify("Error: " .. tostring(err):sub(1, 40)) return end
+	local ok, e = pcall(fn)
+	notify(ok and "Executed" or ("Error: " .. tostring(e):sub(1, 40)))
+	detail.Visible = false
+end)
+
+-- draggable toggle
+do
+	local dragging, startPos, startInput
+	toggle.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging, startPos, startInput = true, toggle.Position, i.Position
+			i.Changed:Connect(function() if i.UserInputState == Enum.UserInputState.End then dragging = false end end)
+		end
+	end)
+	UIS.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			local d = i.Position - startInput
+			toggle.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+			panel.Position = UDim2.new(toggle.Position.X.Scale, toggle.Position.X.Offset - 302, toggle.Position.Y.Scale, toggle.Position.Y.Offset + 46)
+		end
+	end)
+end
