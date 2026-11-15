@@ -2,7 +2,7 @@ local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local TS = game:GetService("TweenService")
 
-local API_KEY = "ISI_KEY_GROQ"
+local API_KEY = "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"
 local URL = "https://api.groq.com/openai/v1/chat/completions"
 local MODEL = "openai/gpt-oss-120b"
 
