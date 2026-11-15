@@ -1,0 +1,303 @@
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local TS = game:GetService("TweenService")
+
+local API_KEY = "ISI_KEY_GROQ"
+local URL = "https://api.groq.com/openai/v1/chat/completions"
+local MODEL = "openai/gpt-oss-120b"
+
+local SYSTEM = [==[Kamu asisten di Roblox Studio Lite. Jawab selalu panjang, detail, dan lengkap.
+Jawabanmu dikirim dalam 2 balasan. Balasan pertama boleh terpotong di mana saja, termasuk di tengah kode atau tag. Itu tidak masalah, yang penting panjang. Balasan kedua akan meminta kamu melanjutkan: lanjutkan tepat dari karakter terakhir yang terpotong, tanpa pembuka, tanpa mengulang, sampai selesai.
+Jika diminta membuat sesuatu di Studio (part, dinding, rumah, dll), sertakan satu blok <build>JSON_ARRAY</build> berisi perintah:
+{"cmd":"part","name":"Nama","size":[x,y,z],"pos":[x,y,z],"color":[r,g,b],"material":"Brick","shape":"Block","anchored":true,"transparency":0}
+{"cmd":"delete","name":"Nama"}
+shape: Block, Ball, Cylinder. Jangan beri komentar di dalam JSON.]==]
+
+local history = {}
+
+-- Lapisan 1: UI
+local gui = Instance.new("ScreenGui")
+gui.Name = "AIChat"
+gui.ResetOnSpawn = false
+gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+
+local function round(o, r)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, r)
+	c.Parent = o
+end
+
+local function stroke(o)
+	local s = Instance.new("UIStroke")
+	s.Color = Color3.new(1, 1, 1)
+	s.Transparency = 0.92
+	s.Parent = o
+end
+
+local main = Instance.new("Frame")
+main.Size = UDim2.fromOffset(340, 420)
+main.Position = UDim2.new(0.5, -170, 0.5, -210)
+main.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+main.BackgroundTransparency = 0.08
+main.Active = true
+main.Draggable = true
+main.Parent = gui
+round(main, 14)
+stroke(main)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 40)
+title.BackgroundTransparency = 1
+title.Text = "Assistant"
+title.Font = Enum.Font.GothamMedium
+title.TextSize = 15
+title.TextColor3 = Color3.fromRGB(235, 235, 240)
+title.Parent = main
+
+local scroll = Instance.new("ScrollingFrame")
+scroll.Position = UDim2.fromOffset(12, 44)
+scroll.Size = UDim2.new(1, -24, 1, -104)
+scroll.BackgroundTransparency = 1
+scroll.BorderSizePixel = 0
+scroll.ScrollBarThickness = 3
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroll.CanvasSize = UDim2.new()
+scroll.Parent = main
+
+local list = Instance.new("UIListLayout")
+list.Padding = UDim.new(0, 8)
+list.SortOrder = Enum.SortOrder.LayoutOrder
+list.Parent = scroll
+
+local box = Instance.new("TextBox")
+box.Position = UDim2.new(0, 12, 1, -52)
+box.Size = UDim2.new(1, -92, 0, 40)
+box.BackgroundColor3 = Color3.fromRGB(30, 30, 36)
+box.PlaceholderText = "Tulis pesan"
+box.PlaceholderColor3 = Color3.fromRGB(130, 130, 140)
+box.Text = ""
+box.TextColor3 = Color3.fromRGB(235, 235, 240)
+box.Font = Enum.Font.Gotham
+box.TextSize = 14
+box.ClearTextOnFocus = false
+box.Parent = main
+round(box, 10)
+stroke(box)
+
+local send = Instance.new("TextButton")
+send.Position = UDim2.new(1, -72, 1, -52)
+send.Size = UDim2.fromOffset(60, 40)
+send.BackgroundColor3 = Color3.fromRGB(235, 235, 240)
+send.Text = "Kirim"
+send.TextColor3 = Color3.fromRGB(18, 18, 22)
+send.Font = Enum.Font.GothamMedium
+send.TextSize = 14
+send.AutoButtonColor = false
+send.Parent = main
+round(send, 10)
+
+local scale = Instance.new("UIScale")
+scale.Parent = send
+local info = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
+send.MouseButton1Down:Connect(function()
+	TS:Create(scale, info, {Scale = 0.97}):Play()
+end)
+send.MouseButton1Up:Connect(function()
+	TS:Create(scale, info, {Scale = 1}):Play()
+end)
+send.MouseEnter:Connect(function()
+	TS:Create(send, info, {BackgroundColor3 = Color3.fromRGB(255, 255, 255)}):Play()
+end)
+send.MouseLeave:Connect(function()
+	TS:Create(send, info, {BackgroundColor3 = Color3.fromRGB(235, 235, 240)}):Play()
+	TS:Create(scale, info, {Scale = 1}):Play()
+end)
+
+local order = 0
+local function toBottom()
+	task.defer(function()
+		scroll.CanvasPosition = Vector2.new(0, scroll.AbsoluteCanvasSize.Y)
+	end)
+end
+
+local function addBubble(text, isUser)
+	order += 1
+	local l = Instance.new("TextLabel")
+	l.LayoutOrder = order
+	l.Size = UDim2.new(0.88, 0, 0, 0)
+	l.AutomaticSize = Enum.AutomaticSize.Y
+	l.BackgroundColor3 = isUser and Color3.fromRGB(52, 52, 62) or Color3.fromRGB(30, 30, 36)
+	l.TextColor3 = Color3.fromRGB(235, 235, 240)
+	l.Font = Enum.Font.Gotham
+	l.TextSize = 14
+	l.TextWrapped = true
+	l.TextXAlignment = Enum.TextXAlignment.Left
+	l.TextYAlignment = Enum.TextYAlignment.Top
+	l.Text = text
+	l.Parent = scroll
+	local p = Instance.new("UIPadding")
+	p.PaddingTop = UDim.new(0, 8)
+	p.PaddingBottom = UDim.new(0, 8)
+	p.PaddingLeft = UDim.new(0, 10)
+	p.PaddingRight = UDim.new(0, 10)
+	p.Parent = l
+	round(l, 10)
+	toBottom()
+end
+
+local function addSkeleton()
+	order += 1
+	local f = Instance.new("Frame")
+	f.LayoutOrder = order
+	f.Size = UDim2.new(0.6, 0, 0, 38)
+	f.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
+	f.Parent = scroll
+	round(f, 10)
+	local g = Instance.new("UIGradient")
+	g.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(60, 60, 70)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(110, 110, 125)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(60, 60, 70)),
+	})
+	g.Offset = Vector2.new(-1, 0)
+	g.Parent = f
+	local tw = TS:Create(g, TweenInfo.new(1.5, Enum.EasingStyle.Linear, Enum.EasingDirection.In, -1), {Offset = Vector2.new(1, 0)})
+	tw:Play()
+	toBottom()
+	return f, tw
+end
+
+-- Lapisan 2: HTTP
+local function chat(messages, maxTokens)
+	local ok, res = pcall(function()
+		return HttpService:RequestAsync({
+			Url = URL,
+			Method = "POST",
+			Headers = {
+				["Content-Type"] = "application/json",
+				["Authorization"] = "Bearer " .. API_KEY,
+			},
+			Body = HttpService:JSONEncode({
+				model = MODEL,
+				messages = messages,
+				max_tokens = maxTokens,
+				reasoning_effort = "low",
+			}),
+		})
+	end)
+	if not ok then return nil, tostring(res) end
+	if not res.Success then return nil, "HTTP " .. res.StatusCode end
+	local data = HttpService:JSONDecode(res.Body)
+	local c = data.choices and data.choices[1]
+	if not c then return nil, "respon kosong" end
+	return c.message.content or "", c.finish_reason
+end
+
+local function withSkeleton(messages, maxTokens)
+	local sk, tw = addSkeleton()
+	local a, b = chat(messages, maxTokens)
+	tw:Cancel()
+	sk:Destroy()
+	return a, b
+end
+
+-- Lapisan 3: Builder
+local function getFolder()
+	local f = workspace:FindFirstChild("AIBuild")
+	if not f then
+		f = Instance.new("Folder")
+		f.Name = "AIBuild"
+		f.Parent = workspace
+	end
+	return f
+end
+
+local function build(cmds)
+	local folder = getFolder()
+	local made = 0
+	for i, c in ipairs(cmds) do
+		if i > 200 then break end
+		if type(c) == "table" then
+			if c.cmd == "part" then
+				local p = Instance.new("Part")
+				p.Name = tostring(c.name or "Part")
+				p.Anchored = c.anchored ~= false
+				p.Size = Vector3.new(unpack(c.size or {4, 1, 2}))
+				p.Position = Vector3.new(unpack(c.pos or {0, 5, 0}))
+				p.Color = Color3.fromRGB(unpack(c.color or {163, 162, 165}))
+				p.Transparency = tonumber(c.transparency) or 0
+				pcall(function() p.Material = Enum.Material[c.material] end)
+				pcall(function() p.Shape = Enum.PartType[c.shape] end)
+				p.Parent = folder
+				made += 1
+			elseif c.cmd == "delete" then
+				local t = folder:FindFirstChild(tostring(c.name))
+				if t then t:Destroy() end
+			end
+		end
+	end
+	return made
+end
+
+local function runBuild(text)
+	local raw = text:match("<build>(.-)</build>")
+	if not raw then return end
+	raw = raw:gsub("```%a*", ""):gsub("```", "")
+	local ok, cmds = pcall(function()
+		return HttpService:JSONDecode(raw)
+	end)
+	if not ok or type(cmds) ~= "table" then
+		addBubble("Build gagal dibaca.", false)
+		return
+	end
+	if cmds.cmd then cmds = {cmds} end
+	local made = build(cmds)
+	addBubble("Dibuat: " .. made .. " part (folder AIBuild di Workspace)", false)
+end
+
+-- Kirim
+local busy = false
+local function submit()
+	if busy then return end
+	local t = box.Text:match("^%s*(.-)%s*$")
+	if t == "" then return end
+	busy = true
+	box.Text = ""
+	addBubble(t, true)
+	table.insert(history, {role = "user", content = t})
+	while #history > 10 do table.remove(history, 1) end
+
+	local msgs = {{role = "system", content = SYSTEM}}
+	for _, m in ipairs(history) do table.insert(msgs, m) end
+
+	local p1, fr = withSkeleton(msgs, 900)
+	if not p1 then
+		table.remove(history)
+		addBubble("Error: " .. tostring(fr), false)
+		busy = false
+		return
+	end
+	addBubble(p1, false)
+	local full = p1
+
+	if fr == "length" then
+		table.insert(msgs, {role = "assistant", content = p1})
+		table.insert(msgs, {role = "user", content = "Lanjutkan tepat dari potongan terakhir. Jangan ulangi, tanpa pembuka. Selesaikan sampai akhir."})
+		local p2, e2 = withSkeleton(msgs, 2000)
+		if p2 then
+			addBubble(p2, false)
+			full = full .. p2
+		else
+			addBubble("Error bagian 2: " .. tostring(e2), false)
+		end
+	end
+
+	table.insert(history, {role = "assistant", content = full})
+	runBuild(full)
+	busy = false
+end
+
+send.Activated:Connect(submit)
+box.FocusLost:Connect(function(enter)
+	if enter then submit() end
+end)
